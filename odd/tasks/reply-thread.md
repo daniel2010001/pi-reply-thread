@@ -40,7 +40,7 @@ reply an ordered and a unique ID, and keeps the open asks of earlier replies vis
 | T12 | S8 | [x] Central: Pending tab in the `/replies` overlay, answer by pasting quotes, `s`/`x`/`l`/`u` keys, fold, widget count | gentle-ai-worker, test-first | `35c25ff` |
 | T13 | S8 | [x] README, CHANGELOG, help for the central | gentle-ai-worker | `3237761` |
 | T15 | S3 | [x] A heading ending in `?` is a section title, not an ask | inline, test-first | `78ba643` |
-| T17 | S8 | [x] Demo session (`pnpm demo`) to try `l` on repeated asks | inline | `T17` |
+| T17 | S8 | [x] Demo session (`pnpm demo`) to try `l` on repeated asks | inline | `dab4944` |
 | T14 | S8 | [ ] v0.2, not started: optional on-demand `/replies triage` (L21) | — | — |
 | T7 | S1-S6 | [x] README (English), command help, CHANGELOG | inline | `e9d0b1f` |
 
