@@ -30,7 +30,7 @@ reply an ordered and a unique ID, and keeps the open asks of earlier replies vis
 | T3 | S3 | [x] Open-ask detection rules + tests (question lines outside code, decision markers; code and quotes ignored) | gentle-ai-worker + parent review | `e5ebe1c` |
 | T4 | S4, S2 | [x] `/replies` command: thread list, full-reply viewer, open by `P#.R#` or entry ID; non-TUI fallback | gentle-ai-worker + parent review | `5666c5e` |
 | T5 | S3 | [x] Widget above the editor (≥2 replies on the current prompt, names waiting replies), refreshed on `message_end` and session start | gentle-ai-worker + parent review | `5666c5e` |
-| T6 | S5 | [ ] Load check in plain Pi and in Gentle Shell with a real session (wake fix L10) | inline + owner look | `fix` below |
+| T6 | S5 | [ ] Load check in plain Pi and in Gentle Shell with a real session (wake fix L10) | inline + owner look | `4e15ad4` |
 | T7 | S1-S6 | [ ] README (English), command help, CHANGELOG | inline | — |
 
 ## Log
