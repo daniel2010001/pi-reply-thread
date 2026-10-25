@@ -50,6 +50,12 @@ function textOf(content: Content): string {
 		.join("\n");
 }
 
+/**
+ * gentle-agents wakes the session with a user-role message after a job or subagent ends. It is not a
+ * prompt: the notice that came before it is the trigger of the next reply.
+ */
+const WAKE_PREFIX = "[System-generated Gentle Agents notification, not written by the user]";
+
 const JOB = /^Background job (\S+)(?: \("((?:[^"\\]|\\.)*)"\))?/;
 const MONITOR = /^Monitor (\S+)(?: \("((?:[^"\\]|\\.)*)"\))?/;
 const WORKER = /^Subagent (\S+) \(task [^,)]+(?:, "((?:[^"\\]|\\.)*)")?\) finished/;
@@ -94,6 +100,7 @@ export function buildThreads(entries: readonly SessionEntry[]): Thread[] {
 		const message = entry.message as { role?: string; content?: Content; stopReason?: string };
 
 		if (message.role === "user") {
+			if (textOf(message.content).startsWith(WAKE_PREFIX)) continue;
 			prompts += 1;
 			current = {
 				prompt: prompts,

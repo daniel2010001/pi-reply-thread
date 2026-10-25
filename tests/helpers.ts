@@ -92,3 +92,20 @@ export function sessionMessage(session: string): SessionEntry {
 		`Session message from ${session} (correlation 7d8527e58d73c03ea8275648cee9aefa): Recibido.`,
 	);
 }
+
+const WAKE_TEXT =
+	"[System-generated Gentle Agents notification, not written by the user] Subagent output was delivered to this session above. Review it and continue.";
+
+/** The user-role message gentle-agents sends to wake the session after a job or subagent ends. */
+export function wake(nonce?: string): SessionEntry[] {
+	const text = nonce ? `${WAKE_TEXT} [gentle-agents wake: ${nonce}]` : WAKE_TEXT;
+	const message = user(text);
+	if (!nonce) return [message];
+	const identity = {
+		...base(),
+		type: "custom",
+		customType: "gentle-agents.wake-identity",
+		data: { sessionId: "01a174f0-9039-70c4-a62a-811494db3277", nonce, text },
+	} as SessionEntry;
+	return [identity, message];
+}

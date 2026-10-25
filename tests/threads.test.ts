@@ -8,6 +8,7 @@ import {
 	sessionMessage,
 	toolResult,
 	user,
+	wake,
 	workerResult,
 } from "./helpers.ts";
 
@@ -55,6 +56,36 @@ describe("buildThreads", () => {
 			[1, ["P1.R1"]],
 			[2, ["P2.R1", "P2.R2"]],
 		]);
+	});
+
+	it("keeps the replies after a gentle-agents wake under the prompt that started them", () => {
+		const threads = buildThreads([
+			user("revisalo"),
+			assistant("Lancé los tests. ¿Me contás qué ves?", { id: "7065669d" }),
+			jobNotice("job-1", "tests"),
+			...wake("45fa30f2-cfce-4f04-a946-5a631d090bbb"),
+			assistant("Tests en verde.", { id: "52f71704" }),
+			workerResult("gentle-ai-worker", "mvlp-1", "docs"),
+			...wake(),
+			assistant("Docs listas.", { id: "c9d0e1f2" }),
+		]);
+
+		expect(threads.map((thread) => [thread.prompt, thread.promptText])).toEqual([[1, "revisalo"]]);
+		expect(threads[0].replies.map((reply) => [reply.ordinal, reply.entryId, reply.triggers])).toEqual([
+			["P1.R1", "7065669d", [{ kind: "prompt", label: "prompt" }]],
+			["P1.R2", "52f71704", [{ kind: "job", label: "tests" }]],
+			["P1.R3", "c9d0e1f2", [{ kind: "worker", label: "docs" }]],
+		]);
+	});
+
+	it("still treats a prompt that only mentions the wake text later on as a prompt", () => {
+		const threads = buildThreads([
+			user("¿Qué significa [System-generated Gentle Agents notification, not written by the user]?"),
+			assistant("Es el aviso de gentle-agents."),
+		]);
+
+		expect(threads).toHaveLength(1);
+		expect(threads[0].replies[0].triggers).toEqual([{ kind: "prompt", label: "prompt" }]);
 	});
 
 	it("keeps a prompt with no reply yet as an empty thread", () => {
