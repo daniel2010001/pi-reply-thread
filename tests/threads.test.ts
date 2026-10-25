@@ -166,6 +166,17 @@ describe("buildThreads", () => {
 		expect(threads[0].replies[0].triggers).toEqual([{ kind: "job", label: "boot" }]);
 	});
 
+	it("lists the open asks of each reply and leaves a plain reply with none", () => {
+		const threads = buildThreads([
+			user("hacelo"),
+			assistant("Listo el borrador.\n\n**¿Lo publico ya?**"),
+			jobNotice("job-1", "tests"),
+			assistant("Tests en verde."),
+		]);
+
+		expect(threads[0].replies.map((reply) => reply.openAsks)).toEqual([["¿Lo publico ya?"], []]);
+	});
+
 	it("records the timestamp of the prompt and of every reply", () => {
 		const entries = [user("hola"), assistant("uno")];
 		const [thread] = buildThreads(entries);

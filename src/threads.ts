@@ -1,4 +1,5 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { detectOpenAsks } from "./asks.ts";
 
 export type TriggerKind = "prompt" | "job" | "monitor" | "worker" | "session" | "other";
 
@@ -122,7 +123,7 @@ export function buildThreads(entries: readonly SessionEntry[]): Thread[] {
 			timestamp: entry.timestamp,
 			text,
 			triggers: pending,
-			openAsks: [],
+			openAsks: detectOpenAsks(text),
 		});
 		pending = [];
 	}
