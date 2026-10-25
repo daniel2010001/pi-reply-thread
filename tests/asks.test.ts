@@ -131,4 +131,22 @@ describe("detectOpenAsks", () => {
 		expect(detectOpenAsks("Tests are green.\n\n- The PR is open.\n## Summary")).toEqual([]);
 		expect(detectOpenAsks("")).toEqual([]);
 	});
+
+	it("does not take a decision marker that is only quoted as an ask", () => {
+		expect(
+			detectOpenAsks(
+				[
+					'Detecta marcadores como "Needs your decision" y "necesito tu OK".',
+					"El aviso “waiting on you” sale en el widget.",
+					"La frase «necesito que decidas» también cuenta.",
+				].join("\n"),
+			),
+		).toEqual([]);
+	});
+
+	it("still takes a marker next to a quote, and a quoted question at the end of a line", () => {
+		expect(
+			detectOpenAsks(['Needs your decision: "A" or "B".', 'He asked "ship it?"'].join("\n")),
+		).toEqual(['Needs your decision: "A" or "B".', 'He asked "ship it?"']);
+	});
 });

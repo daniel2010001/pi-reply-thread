@@ -6,6 +6,8 @@ const FENCE = /^(`{3,}|~{3,})/;
 const BULLET = /^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/;
 const HEADING = /^#{1,6}\s+/;
 const CODE_SPAN = /(`+)[^`]+?\1/g;
+/** Double-quoted spans: a marker inside one is being mentioned, not addressed to the user. */
+const QUOTED = /"[^"]*"|“[^”]*”|«[^»]*»/gu;
 /** Closing marks that may follow the `?` of a question. */
 const CLOSERS = /[\s*_)"'”’»]+$/u;
 
@@ -27,7 +29,7 @@ function stripMarks(text: string): string {
 /** Whether a cleaned line, with inline code removed, asks the user something. */
 function isAsk(line: string): boolean {
 	const prose = line.replace(CODE_SPAN, "");
-	return MARKERS.test(prose) || prose.replace(CLOSERS, "").endsWith("?");
+	return MARKERS.test(prose.replace(QUOTED, "")) || prose.replace(CLOSERS, "").endsWith("?");
 }
 
 /**

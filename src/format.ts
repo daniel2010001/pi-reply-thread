@@ -79,7 +79,7 @@ export function widgetLines(threads: readonly Thread[]): string[] | undefined {
 	const summary = thread.replies
 		.map((reply) => `R${reply.index} ${triggerText(reply.triggers)}${reply.openAsks.length ? " ⚠" : ""}`)
 		.join(" · ");
-	const lines = [`P${thread.prompt} · ${thread.replies.length} replies: ${summary} · /replies`];
+	const lines = [`P${thread.prompt} · ${thread.replies.length} replies: ${summary} · alt+r`];
 	for (const reply of thread.replies) {
 		if (reply.openAsks.length) lines.push(`⚠ ${reply.ordinal} waits on you: ${reply.openAsks[0]}`);
 	}

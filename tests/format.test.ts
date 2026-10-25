@@ -145,7 +145,7 @@ describe("widgetLines", () => {
 			replies: [p12.replies[0], { ...p12.replies[1], openAsks: ["Needs your decision: merge?"] }, p12.replies[2]],
 		};
 		expect(widgetLines([p11, waiting])).toEqual([
-			"P12 · 3 replies: R1 prompt ⚠ · R2 job: tests ⚠ · R3 worker: docs · /replies",
+			"P12 · 3 replies: R1 prompt ⚠ · R2 job: tests ⚠ · R3 worker: docs · alt+r",
 			"⚠ P12.R1 waits on you: ¿Cuál preferís?",
 			"⚠ P12.R2 waits on you: Needs your decision: merge?",
 		]);
@@ -156,7 +156,7 @@ describe("widgetLines", () => {
 			...p11,
 			replies: [p11.replies[0], reply(11, 2, "22222222", [])],
 		};
-		expect(widgetLines([p12, twoReplies])).toEqual(["P11 · 2 replies: R1 prompt · R2 follow-up · /replies"]);
+		expect(widgetLines([p12, twoReplies])).toEqual(["P11 · 2 replies: R1 prompt · R2 follow-up · alt+r"]);
 	});
 
 	it("is hidden while the latest thread has fewer than 2 replies", () => {

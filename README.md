@@ -40,7 +40,7 @@ gsh -- -e ./extensions/reply-thread.ts   # Gentle Shell
 
 | Command | What it does |
 |---|---|
-| `/replies` | Opens the index of the current branch, newest prompt first. |
+| `/replies` or `Alt+R` | Opens the index of the current branch, newest prompt first. |
 | `/replies P12.R1` | Opens one reply in full by its ordered ID (case-insensitive). |
 | `/replies a1b2c3d4` | Opens one reply in full by its entry ID. |
 
@@ -48,7 +48,7 @@ In the index, `↑`/`↓` move, `Enter` opens a reply, `Esc` closes. In the repl
 scroll, `PgUp`/`PgDn` or `Space` page, `Home`/`End` jump, and `Esc` or `q` goes back. A reply
 opened by ID closes on `Esc`.
 
-Outside the interactive TUI (print or RPC mode), `/replies` sends the index or the reply as plain
+Outside the interactive TUI (print or RPC mode), `/replies` and `Alt+R` send the index or the reply as plain
 text.
 
 ### Reply IDs
@@ -82,7 +82,8 @@ A reply is marked `⚠` when one of its lines asks you something:
 - the line ends with `?` (for example `¿Cuál preferís?`), or
 - it contains a decision marker: `needs your decision`, `decision needed`, `waiting on you`,
   `waiting for you`, `necesito que decidas`, `necesito tu OK`, `necesito tu decisión`,
-  `necesito tu confirmación`.
+  `necesito tu confirmación`. A marker inside double quotes (`"…"`, `“…”`, `«…»`) is only being
+  mentioned and does not count.
 
 Code blocks, inline code, blockquotes and table rows are ignored. Detection is deterministic: it
 can miss an ask phrased without a question mark, and it can flag a rhetorical question.
@@ -95,11 +96,11 @@ While the latest prompt has two or more replies, a widget above the editor summa
 the ones waiting on you:
 
 ```
-P12 · 3 replies: R1 prompt ⚠ · R2 job: tests · R3 worker: docs · /replies
+P12 · 3 replies: R1 prompt ⚠ · R2 job: tests · R3 worker: docs · alt+r
 ⚠ P12.R1 waits on you: Encontré dos opciones. ¿Cuál preferís?
 ```
 
-It clears when the next prompt starts.
+It clears when the next prompt starts. `Alt+R` opens the full index.
 
 ## Themes
 

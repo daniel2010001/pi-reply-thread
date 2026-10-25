@@ -7,7 +7,7 @@
 - Label what triggered each reply: the prompt, a background job, a monitor, a subagent or another
   session. Gentle Agents wake messages are not counted as prompts.
 - Mark the replies that wait on you: lines that end with `?` and decision markers, outside code,
-  quotes and tables.
+  quotes and tables. A marker inside double quotes is only mentioned and does not count.
 - `/replies` opens a themed index of the branch and a full-reply viewer; `/replies <P#.R# | entry ID>`
-  opens one reply directly. Plain-text output outside the TUI.
+  opens one reply directly; `Alt+R` opens the index without typing. Plain-text output outside the TUI.
 - A widget above the editor summarizes the latest prompt while it has two or more replies.
