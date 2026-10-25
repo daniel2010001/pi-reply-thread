@@ -64,3 +64,25 @@ describe("noMatchMessage", () => {
 		expect(noMatchMessage("P9.R9")).toBe('No reply matches "P9.R9". Run /replies to list them.');
 	});
 });
+
+describe("findReply by question ID", () => {
+	const asking: Thread[] = [
+		{
+			...threads[1],
+			replies: [{ ...reply(12, 1, "c9d0e1f2"), openAsks: ["¿Uno?", "¿Dos?"] }],
+		},
+	];
+
+	it("opens the reply of a question by its ordered ID, any case, or its unique ID", () => {
+		expect(findReply(asking, "P12.R1.Q2")?.entryId).toBe("c9d0e1f2");
+		expect(findReply(asking, "p12.r1.q1")?.entryId).toBe("c9d0e1f2");
+		expect(findReply(asking, "c9d0e1f2.2")?.ordinal).toBe("P12.R1");
+	});
+
+	it("does not match a question the reply does not have", () => {
+		expect(findReply(asking, "P12.R1.Q3")).toBeUndefined();
+		expect(findReply(asking, "P12.R1.Q0")).toBeUndefined();
+		expect(findReply(asking, "c9d0e1f2.3")).toBeUndefined();
+		expect(findReply(asking, "C9D0E1F2.1")).toBeUndefined();
+	});
+});

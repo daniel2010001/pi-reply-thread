@@ -94,6 +94,16 @@ describe("reply-thread extension", () => {
 		expect(notices).toEqual([["P1.R1 · a1b2c3d4 · 12:00 · prompt\n\nEncontré dos opciones.", "info"]]);
 	});
 
+	it("opens the reply of a question by either question ID", async () => {
+		const { commands } = load();
+		branch[1] = assistant("¿Cuál preferís?", { id: "a1b2c3d4" });
+		for (const id of ["p1.r1.q1", "a1b2c3d4.1"]) {
+			const { ctx, notices } = fakeCtx(branch);
+			await commands.get("replies")!.handler(id, ctx);
+			expect(notices).toEqual([["P1.R1 · a1b2c3d4 · 12:00 · prompt\n\n¿Cuál preferís?", "info"]]);
+		}
+	});
+
 	it("notifies the plain-text index for /replies outside the TUI", async () => {
 		const { commands } = load();
 		const { ctx, notices } = fakeCtx(branch);
