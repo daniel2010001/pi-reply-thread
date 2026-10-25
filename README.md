@@ -106,18 +106,18 @@ The **Pending** tab lists the asks still open, grouped under their prompt, newes
 ```
 ╭─ Pending ────────────────────────────────────────────────────────── 4 open · 0 linked ─╮
 │ ▌P2  buscá si existe algo así                                                    12:01 │
-│ ›☐ P2.R1.Q1  Encontré dos opciones. ¿Cuál preferís?                                    │
-│  ☐ P2.R2.Q1  ¿Borro las tres ramas viejas?  ≈ P1.R1.Q1                                 │
+│ ›○ P2.R1.Q1  Encontré dos opciones. ¿Cuál preferís?                                    │
+│  ○ P2.R2.Q1  ¿Borro las tres ramas viejas?  ≈ P1.R1.Q1                                 │
 │ ▌P1  limpiá las ramas viejas                                                     11:47 │
-│  ☐ P1.R1.Q1  Hay tres ramas viejas. ¿Las borro?                                        │
-│  ☐ P1.R1.Q2  Necesito tu OK para pushear main.                                         │
+│  ○ P1.R1.Q1  Hay tres ramas viejas. ¿Las borro?                                        │
+│  ○ P1.R1.Q2  Necesito tu OK para pushear main.                                         │
 ╰─ enter answer · s sí · space mark · x dismiss · o open · tab replies · esc close ──────╯
 ```
 
 | Key | What it does |
 |---|---|
 | `↑`/`↓`, `PgUp`/`PgDn` | Move. |
-| `Space` | Marks or unmarks an ask (`☑`). |
+| `Space` | Marks or unmarks an ask (`●`; an unmarked ask shows `○`). |
 | `Enter` | Answers the marked asks, or the selected one: closes the overlay and pastes `> P2.R1.Q1: <ask>` per ask into the editor, then an empty line to write under. |
 | `s` | The same, with `Sí.` after each quote. |
 | `x` | Dismisses the marked asks, or the selected one. |

@@ -444,7 +444,7 @@ export class RepliesView implements Component {
 
 	// ── Pending view ─────────────────────────────────────────────────────────
 
-	/** `›☐ P13.R1.Q1  <ask>  ↺ <older members>` or `  ≈ <suggested repeat>`; the ask is cut first. */
+	/** `›○ P13.R1.Q1  <ask>  ↺ <older members>` or `  ≈ <suggested repeat>`; the ask is cut first. */
 	private askLine(ask: PendingAsk, selected: boolean, width: number): string {
 		const theme = this.theme;
 		const ordinal = ask.ordinal.padEnd(this.askOrdinalWidth);
@@ -460,7 +460,7 @@ export class RepliesView implements Component {
 		const text = truncateToWidth(ask.text, Math.max(0, room - visibleWidth(suffix)), "…");
 		const content = [
 			selected ? theme.fg("accent", "›") : " ",
-			this.marked.has(ask.id) ? theme.fg("accent", "☑") : theme.fg("muted", "☐"),
+			this.marked.has(ask.id) ? theme.fg("accent", "●") : theme.fg("muted", "○"),
 			" ",
 			theme.fg("accent", selected ? theme.bold(ordinal) : ordinal),
 			"  ",

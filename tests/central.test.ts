@@ -119,15 +119,15 @@ describe("Pending tab", () => {
 		const { lines, text } = central(branch);
 		expect(text().slice(1, 6)).toEqual([
 			expect.stringMatching(/^│ ▌P3  revisá los tests +12:00 │$/),
-			expect.stringMatching(/^│ ›☐ P3\.R1\.Q1  ¿Borro las tres ramas viejas\?  ≈ P1\.R1\.Q1 +│$/),
+			expect.stringMatching(/^│ ›○ P3\.R1\.Q1  ¿Borro las tres ramas viejas\?  ≈ P1\.R1\.Q1 +│$/),
 			expect.stringMatching(/^│ ▌P1  limpiá la rama +12:00 │$/),
-			expect.stringMatching(/^│  ☐ P1\.R1\.Q1  Hay tres ramas viejas\. ¿Las borro\? +│$/),
-			expect.stringMatching(/^│  ☐ P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/),
+			expect.stringMatching(/^│  ○ P1\.R1\.Q1  Hay tres ramas viejas\. ¿Las borro\? +│$/),
+			expect.stringMatching(/^│  ○ P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/),
 		]);
 		expect(lines()[1]).toContain(bg("userMessageBg"));
 		expect(lines()[2]).toContain(bg("selectedBg"));
 		expect(lines()[2]).toContain(`${fg("mdLink")}  ≈ P1.R1.Q1`);
-		expect(lines()[2]).toContain(`${fg("muted")}☐`);
+		expect(lines()[2]).toContain(`${fg("muted")}○`);
 		expect(lines()[4]).not.toContain(bg("selectedBg"));
 	});
 
@@ -142,7 +142,7 @@ describe("Pending tab", () => {
 		]);
 		const row = long.text(60)[2];
 		expect(visibleWidth(row)).toBe(60);
-		expect(row).toMatch(/^│ ›☐ P2\.R1\.Q1  ¿Los borro\? palabra.*…  ↺ P1\.R1\.Q1 │$/);
+		expect(row).toMatch(/^│ ›○ P2\.R1\.Q1  ¿Los borro\? palabra.*…  ↺ P1\.R1\.Q1 │$/);
 		expect(long.lines(60)[2]).toContain(`${fg("muted")}  ↺ P1.R1.Q1`);
 	});
 });
@@ -154,11 +154,11 @@ describe("answering from the central", () => {
 		expect(view.closed()).toEqual({ paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\n\n" });
 	});
 
-	it("space marks asks with ☑ and Enter pastes every marked ask in list order", () => {
+	it("space marks asks with ● and Enter pastes every marked ask in list order", () => {
 		const view = central(branch);
 		view.keys(" ", "tui.select.down", "tui.select.down", " ");
-		expect(view.text()[2]).toMatch(/^│  ☑ P3\.R1\.Q1/);
-		expect(view.lines()[2]).toContain(`${fg("accent")}☑`);
+		expect(view.text()[2]).toMatch(/^│  ● P3\.R1\.Q1/);
+		expect(view.lines()[2]).toContain(`${fg("accent")}●`);
 		view.keys("tui.select.up", " ", " ", "tui.select.confirm");
 		expect(view.closed()).toEqual({
 			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\n> P1.R1.Q2: Necesito tu OK para pushear.\n\n",
@@ -208,9 +208,9 @@ describe("dismissing and linking", () => {
 		expect(rows[0]).toMatch(/ 2 open · 1 linked ─╮$/);
 		expect(rows.slice(1, 5)).toEqual([
 			expect.stringMatching(/^│ ▌P3  revisá los tests +12:00 │$/),
-			expect.stringMatching(/^│ ›☐ P3\.R1\.Q1  ¿Borro las tres ramas viejas\?  ↺ P1\.R1\.Q1 +│$/),
+			expect.stringMatching(/^│ ›○ P3\.R1\.Q1  ¿Borro las tres ramas viejas\?  ↺ P1\.R1\.Q1 +│$/),
 			expect.stringMatching(/^│ ▌P1  limpiá la rama +12:00 │$/),
-			expect.stringMatching(/^│  ☐ P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/),
+			expect.stringMatching(/^│  ○ P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/),
 		]);
 		expect(rows.at(-1)).toContain("u unlink");
 		view.key("u");
@@ -238,13 +238,13 @@ describe("folding", () => {
 	it("keeps 10 prompts with open asks unfolded", () => {
 		const rows = central(prompts(10), { rows: 50 }).text();
 		expect(rows.some((line) => line.includes("Older"))).toBe(false);
-		expect(rows.filter((line) => line.includes("☐"))).toHaveLength(10);
+		expect(rows.filter((line) => line.includes("○"))).toHaveLength(10);
 	});
 
 	it("folds the prompts older than the 10 newest into one Older (N) row that Enter expands", () => {
 		const view = central(prompts(13), { rows: 50 });
 		const rows = view.text();
-		expect(rows.filter((line) => line.includes("☐"))).toHaveLength(10);
+		expect(rows.filter((line) => line.includes("○"))).toHaveLength(10);
 		expect(rows.at(-2)).toMatch(/^│  ▸ Older \(3\) +│$/);
 		expect(view.lines().at(-2)).toContain(fg("muted"));
 		view.keys("tui.select.pageDown", "tui.select.pageDown");
@@ -253,8 +253,8 @@ describe("folding", () => {
 		expect(view.closed()).toBeUndefined();
 		const expanded = view.text();
 		expect(expanded.some((line) => line.includes("Older"))).toBe(false);
-		expect(expanded.filter((line) => line.includes("☐"))).toHaveLength(13);
-		expect(expanded).toContainEqual(expect.stringMatching(/^│ ›☐ P3\.R1\.Q1/));
+		expect(expanded.filter((line) => line.includes("○"))).toHaveLength(13);
+		expect(expanded).toContainEqual(expect.stringMatching(/^│ ›○ P3\.R1\.Q1/));
 	});
 });
 
