@@ -39,7 +39,7 @@ reply an ordered and a unique ID, and keeps the open asks of earlier replies vis
 | T11 | S8 | [x] Core: question IDs, answered/dismissed/linked state rebuilt from the branch, repeat suggestions (`src/pending.ts`) | gentle-ai-worker, test-first | `c6771b2` |
 | T12 | S8 | [x] Central: Pending tab in the `/replies` overlay, answer by pasting quotes, `s`/`x`/`l`/`u` keys, fold, widget count | gentle-ai-worker, test-first | `35c25ff` |
 | T13 | S8 | [x] README, CHANGELOG, help for the central | gentle-ai-worker | `3237761` |
-| T15 | S3 | [x] A heading ending in `?` is a section title, not an ask | inline, test-first | `T15` |
+| T15 | S3 | [x] A heading ending in `?` is a section title, not an ask | inline, test-first | `78ba643` |
 | T14 | S8 | [ ] v0.2, not started: optional on-demand `/replies triage` (L21) | — | — |
 | T7 | S1-S6 | [x] README (English), command help, CHANGELOG | inline | `e9d0b1f` |
 
