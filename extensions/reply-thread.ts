@@ -3,7 +3,7 @@ import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";
 import { formatIndex, formatReplyPlain, widgetLines } from "../src/format.ts";
 import { findReply, noMatchMessage } from "../src/lookup.ts";
 import { buildThreads, type Thread } from "../src/threads.ts";
-import { RepliesView } from "./replies-view.ts";
+import { OVERLAY_OPTIONS, RepliesView } from "./replies-view.ts";
 
 const WIDGET = "reply-thread";
 
@@ -50,7 +50,7 @@ export default function replyThread(pi: ExtensionAPI): void {
 			}
 			await ctx.ui.custom<void>(
 				(tui, theme, keybindings, done) => new RepliesView(tui, theme, keybindings, threads, () => done(), reply),
-				{ overlay: true, overlayOptions: { width: "90%", maxHeight: "90%", anchor: "center" } },
+				{ overlay: true, overlayOptions: OVERLAY_OPTIONS },
 			);
 		},
 	});

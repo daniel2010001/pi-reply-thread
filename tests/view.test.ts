@@ -120,7 +120,7 @@ describe("RepliesView list", () => {
 	it("turns the right border into a scrollbar only when the rows do not fit", () => {
 		const scrollColumn = (lines: string[]) => lines.slice(1, -1).map((line) => [...line].at(-1));
 		expect(scrollColumn(view(threads).text()).every((cell) => cell === "│")).toBe(true);
-		const small = view(threads, { rows: 7 }).text();
+		const small = view(threads, { rows: 9 }).text();
 		expect(small).toHaveLength(5);
 		expect(scrollColumn(small)).toContain("┃");
 	});
@@ -188,3 +188,59 @@ describe("RepliesView viewer", () => {
 		expect(list.text().at(-1)).toContain("esc back");
 	});
 });
+
+describe("RepliesView on any screen", () => {
+	const longReply = (asks = 0) => {
+		resetIds();
+		const questions = Array.from({ length: asks }, (_, index) => `¿Pregunta ${index + 1}?`);
+		const lines = Array.from({ length: 80 }, (_, index) => `Line ${index + 1}`);
+		return buildThreads([user("dame una lista larga"), assistant([...questions, ...lines].join("\n\n"))]);
+	};
+
+	it("stays within Pi's overlay cap of 90% of a tall screen and keeps the bottom border", () => {
+		for (const rows of [41, 50, 80]) {
+			const reader = view(longReply(), { rows, direct: "P1.R1" }).text();
+			expect(reader.length).toBe(Math.floor(rows * 0.9));
+			expect(reader.at(-1)).toMatch(/^╰─ .* ─+╯$/);
+			const many = buildThreads(
+				Array.from({ length: 40 }, (_, index) => [user(`prompt ${index}`), assistant(`reply ${index}`)]).flat(),
+			);
+			const list = view(many, { rows }).text();
+			expect(list.length).toBe(Math.floor(rows * 0.9));
+			expect(list.at(-1)).toMatch(/^╰─ .* ─+╯$/);
+		}
+	});
+
+	it("caps the open asks so the reply keeps room on a short screen", () => {
+		const rows = view(longReply(7), { rows: 14, direct: "P1.R1" }).text();
+		expect(rows).toHaveLength(10);
+		expect(rows.slice(1, 5)).toEqual([
+			expect.stringMatching(/^│ ▌ dame una lista larga +│$/),
+			expect.stringMatching(/^│ ⚠ Waits on you +│$/),
+			expect.stringMatching(/^│   • ¿Pregunta 1\? +│$/),
+			expect.stringMatching(/^│   … 6 more in the reply +│$/),
+		]);
+		expect(rows[5]).toMatch(/^├─+┤$/);
+		expect(rows.slice(6, -1)).toHaveLength(3);
+		expect(rows.at(-1)).toMatch(/^╰─ .* ─+╯$/);
+	});
+
+	it("shows every open ask when they fit", () => {
+		const rows = view(longReply(7), { rows: 30, direct: "P1.R1" }).text();
+		expect(rows.filter((line) => line.includes("• ¿Pregunta"))).toHaveLength(7);
+		expect(rows.some((line) => line.includes("more in the reply"))).toBe(false);
+	});
+
+	it("never grows past a tiny screen", () => {
+		for (const rows of [8, 10, 12]) {
+			const cap = rows - 4;
+			const reader = view(longReply(7), { rows, direct: "P1.R1" }).text();
+			expect(reader.length).toBeLessThanOrEqual(cap);
+			expect(reader.at(-1)).toMatch(/^╰─/);
+			const list = view(threads, { rows }).text();
+			expect(list.length).toBeLessThanOrEqual(cap);
+			expect(list.at(-1)).toMatch(/^╰─/);
+		}
+	});
+});
+

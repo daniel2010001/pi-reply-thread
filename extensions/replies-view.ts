@@ -4,8 +4,12 @@ import { type Component, Markdown, matchesKey, type TUI, truncateToWidth, visibl
 import { formatTime, type IndexRow, indexRows, promptLine, triggerText } from "../src/format.ts";
 import type { Reply, Thread, Trigger, TriggerKind } from "../src/threads.ts";
 
-/** Rows the overlay leaves to the rest of the screen, and the fewest body rows it ever shows. */
+/** Pi cuts an overlay taller than its `maxHeight`, so the view sizes itself to the same cap. */
+const MAX_HEIGHT_PERCENT = 90;
+export const OVERLAY_OPTIONS = { width: "90%", maxHeight: `${MAX_HEIGHT_PERCENT}%`, anchor: "center" } as const;
+/** Rows the overlay leaves to the rest of the screen on a short one. */
 const SCREEN_MARGIN = 4;
+/** Body rows the viewer keeps before it shows the prompt and open asks above them. */
 const MIN_BODY = 3;
 /** Widest trigger column in the list; longer labels are cut there. */
 const TRIGGER_COLUMN = 24;
@@ -96,13 +100,15 @@ export class RepliesView implements Component {
 		if (direct) this.open(direct);
 	}
 
+	/** Rows the whole view may use: never more than Pi's overlay cap, and at least the two borders and a row. */
 	private available(): number {
-		return this.tui.terminal.rows - SCREEN_MARGIN;
+		const rows = this.tui.terminal.rows;
+		return Math.max(3, Math.min(rows - SCREEN_MARGIN, Math.floor((rows * MAX_HEIGHT_PERCENT) / 100)));
 	}
 
 	/** Body rows of the list: the screen minus the top and bottom borders. */
 	private listHeight(): number {
-		return Math.max(MIN_BODY, this.available() - 2);
+		return this.available() - 2;
 	}
 
 	private open(reply: Reply): void {
@@ -293,24 +299,49 @@ export class RepliesView implements Component {
 
 	// ── Viewer ───────────────────────────────────────────────────────────────
 
-	/** Content rows above the separator: the prompt that started the thread, then the open asks. */
+	/**
+	 * What fits above the reply while it keeps MIN_BODY rows: the thread's prompt, then the open asks,
+	 * cut to the first ones and a "more" line, or to a title with their count, when the screen is short.
+	 */
+	private headerPlan(): { prompt: boolean; title: boolean; shown: number; hidden: number } {
+		const asks = this.reply?.openAsks.length ?? 0;
+		const room = this.available() - 3 - MIN_BODY;
+		if (room < 1) return { prompt: false, title: false, shown: 0, hidden: 0 };
+		const list = room - 2;
+		if (!asks || list < 0) return { prompt: true, title: false, shown: 0, hidden: 0 };
+		if (asks <= list) return { prompt: true, title: true, shown: asks, hidden: 0 };
+		if (list >= 2) return { prompt: true, title: true, shown: list - 1, hidden: asks - list + 1 };
+		return { prompt: true, title: true, shown: 0, hidden: asks };
+	}
+
+	/** Content rows above the separator, following `headerPlan`. */
 	private viewerHeader(width: number): string[] {
 		const theme = this.theme;
 		const reply = this.reply as Reply;
-		const prompt = this.thread ? promptLine(this.thread) : "";
-		const lines = [theme.bg("userMessageBg", fit(`${theme.fg("accent", "▌")} ${theme.fg("userMessageText", prompt)}`, width))];
-		if (reply.openAsks.length) {
-			lines.push(theme.fg("warning", theme.bold("⚠ Waits on you")));
-			for (const ask of reply.openAsks) lines.push(`  ${theme.fg("mdListBullet", "•")} ${theme.fg("text", ask)}`);
+		const plan = this.headerPlan();
+		const lines: string[] = [];
+		if (plan.prompt) {
+			const prompt = this.thread ? promptLine(this.thread) : "";
+			lines.push(
+				theme.bg("userMessageBg", fit(`${theme.fg("accent", "▌")} ${theme.fg("userMessageText", prompt)}`, width)),
+			);
+		}
+		if (plan.title) {
+			const count = plan.shown ? "" : ` (${plan.hidden})`;
+			lines.push(theme.fg("warning", theme.bold(`⚠ Waits on you${count}`)));
+			for (const ask of reply.openAsks.slice(0, plan.shown)) {
+				lines.push(`  ${theme.fg("mdListBullet", "•")} ${theme.fg("text", ask)}`);
+			}
+			if (plan.shown && plan.hidden) lines.push(theme.fg("muted", `  … ${plan.hidden} more in the reply`));
 		}
 		return lines;
 	}
 
-	/** Body rows of the viewer: the screen minus both borders, the header and the separator. */
+	/** Body rows of the viewer: the screen minus both borders and, when there is a header, it and its separator. */
 	private viewerHeight(): number {
-		const asks = this.reply?.openAsks.length ?? 0;
-		const headerRows = 1 + (asks ? asks + 1 : 0);
-		return Math.max(MIN_BODY, this.available() - 3 - headerRows);
+		const plan = this.headerPlan();
+		const header = (plan.prompt ? 1 : 0) + (plan.title ? 1 + plan.shown + (plan.shown && plan.hidden ? 1 : 0) : 0);
+		return Math.max(1, this.available() - 2 - (header ? header + 1 : 0));
 	}
 
 	private renderViewer(width: number): string[] {
@@ -333,7 +364,7 @@ export class RepliesView implements Component {
 		return [
 			this.top(reply.ordinal, detail, width),
 			...header.map((line) => this.line(line, width)),
-			this.separator(width),
+			...(header.length ? [this.separator(width)] : []),
 			...body.slice(this.scroll, end).map((line, offset) => this.line(line, width, cells[offset])),
 			this.bottom(hints, position, width),
 		];
