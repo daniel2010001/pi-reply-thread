@@ -96,7 +96,6 @@ describe("detectOpenAsks", () => {
 					"2) Drop it?",
 					"- [ ] Approve the plan?",
 					"## Needs your decision",
-					"### *Which engine?*",
 				].join("\n"),
 			),
 		).toEqual([
@@ -107,7 +106,6 @@ describe("detectOpenAsks", () => {
 			"Drop it?",
 			"Approve the plan?",
 			"Needs your decision",
-			"Which engine?",
 		]);
 	});
 
@@ -149,4 +147,22 @@ describe("detectOpenAsks", () => {
 			detectOpenAsks(['Needs your decision: "A" or "B".', 'He asked "ship it?"'].join("\n")),
 		).toEqual(['Needs your decision: "A" or "B".', 'He asked "ship it?"']);
 	});
+
+	it("takes a heading that ends in a question mark as a section title, not an ask", () => {
+		expect(
+			detectOpenAsks(
+				[
+					"## ¿Y un subagente especializado?",
+					"### *Which engine?*",
+					"Puede servir, pero no para controlar la central.",
+					"# Why not a model?",
+				].join("\n"),
+			),
+		).toEqual([]);
+	});
+
+	it("still takes a decision marker in a heading as an ask", () => {
+		expect(detectOpenAsks("## Needs your decision\n\n- A or B")).toEqual(["Needs your decision"]);
+	});
 });
+

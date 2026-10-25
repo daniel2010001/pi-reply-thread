@@ -55,8 +55,11 @@ export function detectOpenAsks(text: string): string[] {
 		}
 		if (line.startsWith(">") || line.startsWith("|")) continue;
 
+		// A heading that ends in `?` titles a section ("## Why not a model?"); only a marker in it asks.
+		const heading = HEADING.test(line);
 		const cleaned = stripEmphasis(line.replace(HEADING, "").replace(BULLET, "")).trim();
-		if (cleaned && isAsk(cleaned) && !asks.includes(cleaned)) asks.push(cleaned);
+		if (!cleaned || asks.includes(cleaned)) continue;
+		if (heading ? MARKERS.test(cleaned.replace(CODE_SPAN, "").replace(QUOTED, "")) : isAsk(cleaned)) asks.push(cleaned);
 	}
 
 	return asks;
