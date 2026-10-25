@@ -29,7 +29,8 @@
   },
   "scripts": {
     "test": "vitest --run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "demo": "node scripts/demo-session.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=1.2.0 <2",

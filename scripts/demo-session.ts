@@ -1,0 +1,84 @@
+/**
+ * Writes a Pi session file with repeated open asks, to try the central without a real session:
+ *
+ *   node scripts/demo-session.ts [output.jsonl]
+ *   pi --session <output.jsonl> -e ./extensions/reply-thread.ts
+ *
+ * Without an argument the file goes to a new temporary directory. Opening it with Pi appends to it.
+ */
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+export interface DemoEntry {
+	type: string;
+	id: string;
+	parentId: string | null;
+	timestamp: string;
+	[key: string]: unknown;
+}
+
+/** Prompt → reply pairs and notices that leave repeats (`≈`), a chain to build with `l`, and a heading. */
+const SCRIPT: readonly (["user" | "assistant", string] | ["job", string, string])[] = [
+	["user", "Medí el consumo de la desktop."],
+	["assistant", "Listo, 41 W en reposo.\n\nLas mediciones dejaron archivos en `/tmp`: ¿los borro?"],
+	["user", "Revisá el push de lab-ai."],
+	["assistant", "Hay 2 commits nuevos en `lab-ai`.\n\nPush de los 2 commits de lab-ai a origin/main: ¿lo hago?"],
+	["job", "job-1", "tests"],
+	["assistant", "Tests en verde.\n\n## ¿Por qué tardó tanto?\n\nEl primer arranque compila los módulos.\n\nPush de los 2 commits nuevos de lab-ai a origin/main: ¿lo hago?"],
+	["user", "Seguimos con el panel."],
+	["assistant", "El panel ya muestra la CPU.\n\n- ¿Borro los archivos temporales de las mediciones en /tmp?\n- ¿Sumo la GPU al panel?"],
+];
+
+export function demoEntries(cwd: string, start = Date.parse("2026-10-25T12:00:00.000Z")): DemoEntry[] {
+	let clock = start;
+	let parentId: string | null = null;
+	const entries: DemoEntry[] = [];
+	const next = (fields: Record<string, unknown>): void => {
+		clock += 60_000;
+		const id = (entries.length + 1).toString(16).padStart(8, "0");
+		entries.push({ ...fields, type: fields.type as string, id, parentId, timestamp: new Date(clock).toISOString() });
+		parentId = id;
+	};
+	for (const step of SCRIPT) {
+		if (step[0] === "job") {
+			const [, job, label] = step;
+			next({
+				type: "custom_message",
+				customType: "gentle-jobs.notice",
+				content: `Background job ${job} ("${label}") exited with code 0 after 12s.`,
+				display: true,
+			});
+			continue;
+		}
+		const [role, text] = step;
+		const message =
+			role === "user"
+				? { role, content: [{ type: "text", text }], timestamp: clock }
+				: {
+						role,
+						content: [{ type: "text", text }],
+						api: "anthropic-messages",
+						provider: "demo",
+						model: "demo",
+						usage: {},
+						stopReason: "stop",
+						timestamp: clock,
+					};
+		next({ type: "message", message });
+	}
+	const header = {
+		type: "session",
+		version: 3,
+		id: "01a1d300-0000-7000-8000-000000000000",
+		timestamp: new Date(start).toISOString(),
+		cwd,
+	};
+	return [header as unknown as DemoEntry, ...entries];
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+	const output = resolve(process.argv[2] ?? join(mkdtempSync(join(tmpdir(), "reply-thread-demo-")), "demo.jsonl"));
+	writeFileSync(output, `${demoEntries(process.cwd()).map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+	console.log(`Wrote ${output}\nTry it: pi --session ${output} -e ./extensions/reply-thread.ts`);
+}

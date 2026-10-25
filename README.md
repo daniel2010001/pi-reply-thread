@@ -172,6 +172,16 @@ pnpm test
 pnpm typecheck
 ```
 
+To try the central without a real session, write a demo session with repeated asks and open it:
+
+```sh
+pnpm demo                      # prints the file it wrote and the command to open it
+pi --session <file> -e ./extensions/reply-thread.ts
+```
+
+Its Pending tab has two `≈` suggestions to link with `l`, and a `## …?` section title that is not an
+ask. Pi appends to the file when you use it, so write a new one for a fresh start.
+
 ## License
 
 MIT
