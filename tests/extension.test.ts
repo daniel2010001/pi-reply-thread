@@ -105,7 +105,7 @@ describe("reply-thread extension", () => {
 	it("registers /replies with a description", () => {
 		const { commands } = load();
 		expect(commands.get("replies")?.description).toBe(
-			"List the replies of each prompt; /replies <P#.R# | entry ID> opens one in full",
+			"List the replies of each prompt and the asks waiting on you; /replies <P#.R#[.Q#] | entry ID[.#]> opens one in full, /replies pending lists the open asks",
 		);
 	});
 
@@ -204,7 +204,7 @@ describe("reply-thread extension", () => {
 	it("opens the index on alt+r, as /replies does", async () => {
 		const { commands, shortcuts } = load();
 		const shortcut = shortcuts.get("alt+r");
-		expect(shortcut?.description).toBe("Open the reply index (/replies)");
+		expect(shortcut?.description).toBe("Open the pending asks and the reply index (/replies)");
 		const viaKey = fakeCtx(branch, "tui");
 		await shortcut!.handler(viaKey.ctx);
 		const viaCommand = fakeCtx(branch, "tui");

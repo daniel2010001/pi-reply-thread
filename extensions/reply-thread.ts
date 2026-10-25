@@ -11,7 +11,8 @@ const WIDGET = "reply-thread";
 /** Opens the index without typing the command; the widget names it. */
 const SHORTCUT = "alt+r";
 
-const DESCRIPTION = "List the replies of each prompt; /replies <P#.R# | entry ID> opens one in full";
+const DESCRIPTION =
+	"List the replies of each prompt and the asks waiting on you; /replies <P#.R#[.Q#] | entry ID[.#]> opens one in full, /replies pending lists the open asks";
 
 function refreshWidget(ctx: ExtensionContext): void {
 	if (ctx.mode !== "tui") return;
@@ -80,7 +81,7 @@ export default function replyThread(pi: ExtensionAPI): void {
 	});
 
 	pi.registerShortcut(SHORTCUT, {
-		description: "Open the reply index (/replies)",
+		description: "Open the pending asks and the reply index (/replies)",
 		handler: (ctx) => openReplies(pi, ctx, ""),
 	});
 
