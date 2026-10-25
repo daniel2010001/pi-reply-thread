@@ -33,7 +33,7 @@ reply an ordered and a unique ID, and keeps the open asks of earlier replies vis
 | T5 | S3 | [x] Widget above the editor (≥2 replies on the current prompt, names waiting replies), refreshed on `message_end` and session start | gentle-ai-worker + parent review | `5666c5e` |
 | T6 | S5 | [ ] Load check in plain Pi and in Gentle Shell with a real session (wake fix L10) | inline + owner look | `4e15ad4` |
 | T8 | S4, S7 | [x] Card look for `/replies`: theme-token frame, list and viewer | inline, test-first | `27dc683` |
-| T9 | S4, S7 | [x] Fit the card on every screen: never taller than Pi's overlay cap, cap the open-asks list | inline, test-first | — |
+| T9 | S4, S7 | [x] Fit the card on every screen: never taller than Pi's overlay cap, cap the open-asks list | inline, test-first | `27b2d5f` |
 | T7 | S1-S6 | [ ] README (English), command help, CHANGELOG | inline | — |
 
 ## Log
