@@ -34,7 +34,7 @@ reply an ordered and a unique ID, and keeps the open asks of earlier replies vis
 | T6 | S5 | [ ] Load check in plain Pi and in Gentle Shell with a real session (wake fix L10) | inline + owner look | `4e15ad4` |
 | T8 | S4, S7 | [x] Card look for `/replies`: theme-token frame, list and viewer | inline, test-first | `27dc683` |
 | T9 | S4, S7 | [x] Fit the card on every screen: never taller than Pi's overlay cap, cap the open-asks list | inline, test-first | `27b2d5f` |
-| T10 | S3, S4 | [x] Quoted markers do not count; `alt+r` opens the index, named in the widget | inline, test-first | `T10` |
+| T10 | S3, S4 | [x] Quoted markers do not count; `alt+r` opens the index, named in the widget | inline, test-first | `8554297` |
 | T7 | S1-S6 | [x] README (English), command help, CHANGELOG | inline | `e9d0b1f` |
 
 ## Log
