@@ -2,7 +2,9 @@ process.env.TZ = "UTC";
 
 import { describe, expect, it } from "vitest";
 import {
+	answerText,
 	formatIndex,
+	formatPending,
 	formatReplyPlain,
 	formatTime,
 	indexRows,
@@ -139,16 +141,25 @@ describe("rows", () => {
 });
 
 describe("widgetLines", () => {
-	it("summarizes the latest thread and names each reply still waiting", () => {
+	const asks = [
+		{ ordinal: "P12.R1.Q1", id: "a1b2c3d4.1", text: "¿Cuál preferís?" },
+		{ ordinal: "P12.R1.Q2", id: "a1b2c3d4.2", text: "¿Seguimos?" },
+		{ ordinal: "P12.R2.Q1", id: "e5f6a7b8.1", text: "Needs your decision: merge?" },
+	];
+
+	it("summarizes the latest thread and replaces the waiting lines with one pending line", () => {
 		const waiting: Thread = {
 			...p12,
 			replies: [p12.replies[0], { ...p12.replies[1], openAsks: ["Needs your decision: merge?"] }, p12.replies[2]],
 		};
-		expect(widgetLines([p11, waiting])).toEqual([
+		expect(widgetLines([p11, waiting], asks)).toEqual([
 			"P12 · 3 replies: R1 prompt ⚠ · R2 job: tests ⚠ · R3 worker: docs · alt+r",
-			"⚠ P12.R1 waits on you: ¿Cuál preferís?",
-			"⚠ P12.R2 waits on you: Needs your decision: merge?",
+			"⚠ 3 pending · newest: P12.R2.Q1 Needs your decision: merge? · alt+r",
 		]);
+	});
+
+	it("shows the pending line alone while the latest thread has fewer than 2 replies", () => {
+		expect(widgetLines([p12, p11], asks.slice(0, 1))).toEqual(["⚠ 1 pending · newest: P12.R1.Q1 ¿Cuál preferís? · alt+r"]);
 	});
 
 	it("has only the summary line when nothing waits", () => {
@@ -163,5 +174,36 @@ describe("widgetLines", () => {
 		expect(widgetLines([p12, p11])).toBeUndefined();
 		expect(widgetLines([p12, { ...p11, replies: [] }])).toBeUndefined();
 		expect(widgetLines([])).toBeUndefined();
+	});
+});
+
+describe("formatPending", () => {
+	it("lists one open ask per line with its ordered and unique IDs", () => {
+		expect(
+			formatPending([
+				{ ordinal: "P12.R1.Q1", id: "a1b2c3d4.1", text: "¿Cuál preferís?" },
+				{ ordinal: "P13.R2.Q3", id: "e5f6a7b8.3", text: "Necesito tu OK." },
+			]),
+		).toBe("P12.R1.Q1  a1b2c3d4.1  ¿Cuál preferís?\nP13.R2.Q3  e5f6a7b8.3  Necesito tu OK.");
+	});
+
+	it("says nothing waits when there are no open asks", () => {
+		expect(formatPending([])).toBe("Nothing waits on you.");
+	});
+});
+
+describe("answerText", () => {
+	const asks = [
+		{ ordinal: "P13.R1.Q1", id: "a1b2c3d4.1", text: "¿Los borro?" },
+		{ ordinal: "P13.R2.Q1", id: "e5f6a7b8.1", text: "¿Pusheo?" },
+	];
+
+	it("quotes each ask with its ordered ID, then leaves an empty line", () => {
+		expect(answerText(asks.slice(0, 1))).toBe("> P13.R1.Q1: ¿Los borro?\n\n");
+		expect(answerText(asks)).toBe("> P13.R1.Q1: ¿Los borro?\n> P13.R2.Q1: ¿Pusheo?\n\n");
+	});
+
+	it("adds Sí. after each quote line for a yes", () => {
+		expect(answerText(asks, true)).toBe("> P13.R1.Q1: ¿Los borro?\nSí.\n> P13.R2.Q1: ¿Pusheo?\nSí.\n\n");
 	});
 });

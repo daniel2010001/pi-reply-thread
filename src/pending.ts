@@ -29,6 +29,8 @@ export interface Ask extends QuestionId {
 export interface PendingAsk extends Ask {
 	/** Older members of its chain, oldest first; empty for an ask without links. */
 	chain: Ask[];
+	/** Unique ID of the older ask it continues, the link `u` removes. */
+	continues?: string;
 	/** An older open ask that looks like a repeat, for an ask without links. Never linked by itself. */
 	suggestion?: Ask;
 }
@@ -145,7 +147,7 @@ export function buildPending(entries: readonly SessionEntry[], threads = buildTh
 	for (const members of chains.values()) {
 		if (members.some((member) => closed.has(member.id))) continue;
 		const newest = members.at(-1) as Ask;
-		rows.push({ ...newest, chain: members.slice(0, -1) });
+		rows.push({ ...newest, chain: members.slice(0, -1), continues: continues.get(newest.id) });
 	}
 	rows.sort((a, b) => a.seq - b.seq);
 

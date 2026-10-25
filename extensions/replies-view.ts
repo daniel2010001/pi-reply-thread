@@ -1,7 +1,8 @@
 import type { KeybindingsManager, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { type Component, Markdown, matchesKey, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { formatTime, type IndexRow, indexRows, promptLine, triggerText } from "../src/format.ts";
+import { answerText, formatTime, type IndexRow, indexRows, promptLine, triggerText } from "../src/format.ts";
+import type { AskAction, PendingAsk } from "../src/pending.ts";
 import type { Reply, Thread, Trigger, TriggerKind } from "../src/threads.ts";
 
 /** Pi cuts an overlay taller than its `maxHeight`, so the view sizes itself to the same cap. */
@@ -13,6 +14,10 @@ const SCREEN_MARGIN = 4;
 const MIN_BODY = 3;
 /** Widest trigger column in the list; longer labels are cut there. */
 const TRIGGER_COLUMN = 24;
+/** Prompts with open asks shown before the rest fold into one `Older (N)` row. */
+const UNFOLDED_PROMPTS = 10;
+/** Narrowest ask text kept before a row drops its chain or suggestion. */
+const MIN_ASK = 8;
 
 /** Theme token of each trigger kind, so a glance tells a job from a worker. */
 const TRIGGER_COLOR: Record<TriggerKind, ThemeColor> = {
@@ -25,6 +30,20 @@ const TRIGGER_COLOR: Record<TriggerKind, ThemeColor> = {
 };
 
 type Hint = [key: string, action: string];
+
+export type Tab = "pending" | "replies";
+
+/** The pending central: the open asks, and how to dismiss or link them on the branch. */
+export interface Central {
+	pending: readonly PendingAsk[];
+	/** Writes the action to the branch and returns the open asks rebuilt from it. */
+	act(action: AskAction): readonly PendingAsk[];
+	/** The tab to open on; Pending when any ask is open, else Replies. */
+	tab?: Tab;
+}
+
+/** One line of the Pending tab: a prompt header, an open ask, or the folded older prompts. */
+type PendingRow = { kind: "prompt"; thread: Thread } | { kind: "ask"; ask: PendingAsk } | { kind: "older"; count: number };
 
 function plural(count: number, one: string, many: string): string {
 	return `${count} ${count === 1 ? one : many}`;
@@ -50,12 +69,15 @@ function scrollCells(theme: Theme, total: number, height: number, top: number): 
 	);
 }
 
-/** The thread list with a full-reply viewer: Enter opens a reply, Esc goes back, Esc on the list closes. */
+/**
+ * The thread list with a full-reply viewer: Enter opens a reply, Esc goes back, Esc on the list closes.
+ * With a central, a Pending tab lists the open asks; Enter or `s` closes it with the text to paste.
+ */
 export class RepliesView implements Component {
 	private readonly tui: TUI;
 	private readonly theme: Theme;
 	private readonly keybindings: KeybindingsManager;
-	private readonly done: () => void;
+	private readonly done: (paste?: string) => void;
 	private readonly rows: IndexRow[];
 	private readonly counts: string;
 	private readonly ordinalWidth: number;
@@ -68,19 +90,32 @@ export class RepliesView implements Component {
 	private scroll = 0;
 	/** Opened straight on a reply by `/replies <id>`: Esc in the viewer closes instead of going back. */
 	private readonly closeFromViewer: boolean;
+	private readonly central: Central | undefined;
+	private tab: Tab;
+	private pending: readonly PendingAsk[] = [];
+	private pendingRows: PendingRow[] = [];
+	private pendingSelected = 0;
+	private pendingTop = 0;
+	private askOrdinalWidth = 0;
+	private readonly marked = new Set<string>();
+	private expanded = false;
 
 	constructor(
 		tui: TUI,
 		theme: Theme,
 		keybindings: KeybindingsManager,
 		threads: readonly Thread[],
-		done: () => void,
+		done: (paste?: string) => void,
 		direct?: Reply,
+		central?: Central,
 	) {
 		this.tui = tui;
 		this.theme = theme;
 		this.keybindings = keybindings;
 		this.done = done;
+		this.central = central;
+		this.tab = central ? (central.tab ?? (central.pending.length ? "pending" : "replies")) : "replies";
+		if (central) this.setPending(central.pending);
 		this.rows = indexRows(threads);
 		const replies = this.rows.flatMap((row) => (row.reply ? [row.reply] : []));
 		const prompts = threads.filter((thread) => thread.prompt > 0).length;
@@ -111,9 +146,9 @@ export class RepliesView implements Component {
 		return this.available() - 2;
 	}
 
-	private open(reply: Reply): void {
+	private open(reply: Reply, thread?: Thread): void {
 		this.reply = reply;
-		this.thread = this.rows.find((row) => row.reply === reply)?.thread;
+		this.thread = thread ?? this.rows.find((row) => row.reply === reply)?.thread;
 		this.body = new Markdown(reply.text, 0, 0, getMarkdownTheme());
 		this.scroll = 0;
 	}
@@ -151,9 +186,12 @@ export class RepliesView implements Component {
 			else if (matchesKey(data, "home")) this.scroll = 0;
 			else if (matchesKey(data, "end")) this.scroll = Number.MAX_SAFE_INTEGER;
 			else return;
+		} else if (this.tab === "pending") {
+			if (!this.pendingInput(data)) return;
 		} else {
 			const page = this.listHeight() - 1;
 			if (kb.matches(data, "tui.select.cancel")) return this.done();
+			if (this.central && matchesKey(data, "tab")) this.tab = "pending";
 			if (kb.matches(data, "tui.select.confirm")) {
 				const reply = this.rows[this.selected]?.reply;
 				if (!reply) return;
@@ -165,6 +203,113 @@ export class RepliesView implements Component {
 			else return;
 		}
 		this.tui.requestRender();
+	}
+
+	// ── Pending ──────────────────────────────────────────────────────────────
+
+	/** Takes the open asks and rebuilds the rows: prompts newest first, the older ones folded. */
+	private setPending(pending: readonly PendingAsk[]): void {
+		this.pending = pending;
+		const ids = new Set(pending.map((ask) => ask.id));
+		for (const id of this.marked) if (!ids.has(id)) this.marked.delete(id);
+		this.askOrdinalWidth = Math.max(0, ...pending.map((ask) => ask.ordinal.length));
+
+		const groups = new Map<number, { thread: Thread; asks: PendingAsk[] }>();
+		for (const ask of pending) {
+			const group = groups.get(ask.thread.prompt) ?? { thread: ask.thread, asks: [] };
+			group.asks.push(ask);
+			groups.set(ask.thread.prompt, group);
+		}
+		const ordered = [...groups.values()].sort((a, b) => b.thread.prompt - a.thread.prompt);
+		const shown = this.expanded ? ordered : ordered.slice(0, UNFOLDED_PROMPTS);
+		const rows: PendingRow[] = shown.flatMap(({ thread, asks }) => [
+			{ kind: "prompt" as const, thread },
+			...asks.map((ask) => ({ kind: "ask" as const, ask })),
+		]);
+		const folded = ordered.slice(shown.length).reduce((count, group) => count + group.asks.length, 0);
+		if (folded) rows.push({ kind: "older", count: folded });
+		this.pendingRows = rows;
+		this.selectPending(this.pendingSelected);
+	}
+
+	/** Selects the first selectable row at or after `index`, or the last one before it. */
+	private selectPending(index: number): void {
+		const rows = this.pendingRows;
+		const at = Math.min(Math.max(0, index), Math.max(0, rows.length - 1));
+		let next = rows.findIndex((row, offset) => offset >= at && row.kind !== "prompt");
+		if (next < 0) next = rows.findLastIndex((row) => row.kind !== "prompt");
+		this.pendingSelected = Math.max(0, next);
+	}
+
+	private movePending(step: number): void {
+		let next = this.pendingSelected;
+		for (let left = Math.abs(step); left > 0; ) {
+			const candidate = next + Math.sign(step);
+			if (candidate < 0 || candidate >= this.pendingRows.length) break;
+			next = candidate;
+			if (this.pendingRows[next].kind !== "prompt") {
+				this.pendingSelected = next;
+				left -= 1;
+			}
+		}
+	}
+
+	private selectedAsk(): PendingAsk | undefined {
+		const row = this.pendingRows[this.pendingSelected];
+		return row?.kind === "ask" ? row.ask : undefined;
+	}
+
+	/** The marked asks in list order, or the selected one when none is marked. */
+	private targets(): PendingAsk[] {
+		const marked = this.pendingRows.flatMap((row) => (row.kind === "ask" && this.marked.has(row.ask.id) ? [row.ask] : []));
+		if (marked.length) return marked;
+		const ask = this.selectedAsk();
+		return ask ? [ask] : [];
+	}
+
+	private act(actions: AskAction[]): void {
+		const central = this.central as Central;
+		let pending = this.pending;
+		for (const action of actions) pending = central.act(action);
+		this.setPending(pending);
+	}
+
+	/** Keys of the Pending tab; false when the key means nothing there. */
+	private pendingInput(data: string): boolean {
+		const kb = this.keybindings;
+		const page = this.listHeight() - 1;
+		const row = this.pendingRows[this.pendingSelected];
+		const ask = this.selectedAsk();
+		if (kb.matches(data, "tui.select.cancel")) {
+			this.done();
+			return false;
+		}
+		if (matchesKey(data, "tab")) this.tab = "replies";
+		else if (kb.matches(data, "tui.select.up")) this.movePending(-1);
+		else if (kb.matches(data, "tui.select.down")) this.movePending(1);
+		else if (kb.matches(data, "tui.select.pageUp")) this.movePending(-page);
+		else if (kb.matches(data, "tui.select.pageDown")) this.movePending(page);
+		else if (kb.matches(data, "tui.select.confirm") && row?.kind === "older") {
+			this.expanded = true;
+			this.setPending(this.pending);
+		} else if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "s")) {
+			const targets = this.targets();
+			if (!targets.length) return false;
+			this.done(answerText(targets, matchesKey(data, "s")));
+			return false;
+		} else if (matchesKey(data, "space") && ask) {
+			if (!this.marked.delete(ask.id)) this.marked.add(ask.id);
+		} else if (matchesKey(data, "x")) {
+			const targets = this.targets();
+			if (!targets.length) return false;
+			this.act(targets.map((target) => ({ action: "dismiss", ask: target.id })));
+		} else if (matchesKey(data, "l") && ask?.suggestion) {
+			this.act([{ action: "link", ask: ask.id, continues: ask.suggestion.id }]);
+		} else if (matchesKey(data, "u") && ask?.continues) {
+			this.act([{ action: "unlink", ask: ask.id, continues: ask.continues }]);
+		} else if (matchesKey(data, "o") && ask) this.open(ask.reply, ask.thread);
+		else return false;
+		return true;
 	}
 
 	// ── Frame ────────────────────────────────────────────────────────────────
@@ -297,6 +442,103 @@ export class RepliesView implements Component {
 		return [top, ...visible, this.bottom(hints, "", width)];
 	}
 
+	// ── Pending view ─────────────────────────────────────────────────────────
+
+	/** `›☐ P13.R1.Q1  <ask>  ↺ <older members>` or `  ≈ <suggested repeat>`; the ask is cut first. */
+	private askLine(ask: PendingAsk, selected: boolean, width: number): string {
+		const theme = this.theme;
+		const ordinal = ask.ordinal.padEnd(this.askOrdinalWidth);
+		const room = width - 3 - ordinal.length - 2;
+		let suffix = "";
+		let color: ThemeColor = "muted";
+		if (ask.chain.length) suffix = `  ↺ ${ask.chain.map((member) => member.ordinal).join(", ")}`;
+		else if (ask.suggestion) {
+			suffix = `  ≈ ${ask.suggestion.ordinal}`;
+			color = "mdLink";
+		}
+		if (room - visibleWidth(suffix) < MIN_ASK) suffix = "";
+		const text = truncateToWidth(ask.text, Math.max(0, room - visibleWidth(suffix)), "…");
+		const content = [
+			selected ? theme.fg("accent", "›") : " ",
+			this.marked.has(ask.id) ? theme.fg("accent", "☑") : theme.fg("muted", "☐"),
+			" ",
+			theme.fg("accent", selected ? theme.bold(ordinal) : ordinal),
+			"  ",
+			theme.fg("text", text),
+			suffix ? theme.fg(color, suffix) : "",
+		].join("");
+		const line = fit(content, width);
+		return selected ? theme.bg("selectedBg", line) : line;
+	}
+
+	private olderLine(count: number, selected: boolean, width: number): string {
+		const theme = this.theme;
+		const line = fit(`${selected ? theme.fg("accent", "›") : " "}${theme.fg("muted", `▸ Older (${count})`)}`, width);
+		return selected ? theme.bg("selectedBg", line) : line;
+	}
+
+	private pendingHints(): Hint[] {
+		const ask = this.selectedAsk();
+		return [
+			["enter", "answer"],
+			["s", "sí"],
+			["space", "mark"],
+			["x", "dismiss"],
+			...(ask?.suggestion ? ([["l", "link"]] as Hint[]) : []),
+			...(ask?.continues ? ([["u", "unlink"]] as Hint[]) : []),
+			["o", "open"],
+			["tab", "replies"],
+			["esc", "close"],
+		];
+	}
+
+	private renderPending(width: number): string[] {
+		const theme = this.theme;
+		const linked = this.pending.filter((ask) => ask.chain.length).length;
+		const top = this.top("Pending", this.pending.length ? `${this.pending.length} open · ${linked} linked` : "", width);
+		if (!this.pendingRows.length) {
+			return [
+				top,
+				this.line(theme.fg("dim", "Nothing waits on you."), width),
+				this.bottom(
+					[
+						["tab", "replies"],
+						["esc", "close"],
+					],
+					"",
+					width,
+				),
+			];
+		}
+
+		const rows = this.pendingRows;
+		const height = Math.min(this.listHeight(), rows.length);
+		if (this.pendingSelected < this.pendingTop) this.pendingTop = this.pendingSelected;
+		if (this.pendingSelected >= this.pendingTop + height) this.pendingTop = this.pendingSelected - height + 1;
+		this.pendingTop = Math.min(this.pendingTop, rows.length - height);
+		// Show the prompt above the first visible ask when the window starts right under it.
+		if (
+			this.pendingTop > 0 &&
+			rows[this.pendingTop - 1].kind === "prompt" &&
+			this.pendingSelected - this.pendingTop + 1 < height
+		) {
+			this.pendingTop -= 1;
+		}
+		const cells = scrollCells(theme, rows.length, height, this.pendingTop);
+		const content = width - 4;
+		const visible = rows.slice(this.pendingTop, this.pendingTop + height).map((row, offset) => {
+			const selected = this.pendingTop + offset === this.pendingSelected;
+			const text =
+				row.kind === "prompt"
+					? this.threadLine(row.thread, content)
+					: row.kind === "ask"
+						? this.askLine(row.ask, selected, content)
+						: this.olderLine(row.count, selected, content);
+			return this.line(text, width, cells[offset]);
+		});
+		return [top, ...visible, this.bottom(this.pendingHints(), "", width)];
+	}
+
 	// ── Viewer ───────────────────────────────────────────────────────────────
 
 	/**
@@ -371,7 +613,8 @@ export class RepliesView implements Component {
 	}
 
 	render(width: number): string[] {
-		return this.reply && this.body ? this.renderViewer(width) : this.renderList(width);
+		if (this.reply && this.body) return this.renderViewer(width);
+		return this.tab === "pending" ? this.renderPending(width) : this.renderList(width);
 	}
 
 	invalidate(): void {

@@ -1,3 +1,4 @@
+import type { QuestionId } from "./pending.ts";
 import type { Reply, Thread, Trigger } from "./threads.ts";
 
 /** One line of the reply index: a thread header, or a reply that can be opened. */
@@ -72,16 +73,38 @@ export function formatReplyPlain(reply: Reply): string {
 	return `${replyHeader(reply)}\n\n${reply.text}`;
 }
 
-/** Widget lines for the latest thread, or undefined while it has fewer than 2 replies. */
-export function widgetLines(threads: readonly Thread[]): string[] | undefined {
+/**
+ * Widget lines: the latest thread while it has 2 or more replies, and one line for the open asks
+ * (oldest first, a chain counted once). Undefined when there is nothing to show.
+ */
+export function widgetLines(threads: readonly Thread[], pending: readonly QuestionId[] = []): string[] | undefined {
+	const lines: string[] = [];
 	const thread = threads.at(-1);
-	if (!thread || thread.replies.length < 2) return undefined;
-	const summary = thread.replies
-		.map((reply) => `R${reply.index} ${triggerText(reply.triggers)}${reply.openAsks.length ? " ⚠" : ""}`)
-		.join(" · ");
-	const lines = [`P${thread.prompt} · ${thread.replies.length} replies: ${summary} · alt+r`];
-	for (const reply of thread.replies) {
-		if (reply.openAsks.length) lines.push(`⚠ ${reply.ordinal} waits on you: ${reply.openAsks[0]}`);
+	if (thread && thread.replies.length >= 2) {
+		const summary = thread.replies
+			.map((reply) => `R${reply.index} ${triggerText(reply.triggers)}${reply.openAsks.length ? " ⚠" : ""}`)
+			.join(" · ");
+		lines.push(`P${thread.prompt} · ${thread.replies.length} replies: ${summary} · alt+r`);
 	}
-	return lines;
+	const newest = pending.at(-1);
+	if (newest) lines.push(`⚠ ${pending.length} pending · newest: ${newest.ordinal} ${newest.text} · alt+r`);
+	return lines.length ? lines : undefined;
+}
+
+/** The open asks as plain text, for modes without the TUI. */
+export function formatPending(pending: readonly QuestionId[]): string {
+	if (!pending.length) return "Nothing waits on you.";
+	return pending.map((ask) => `${ask.ordinal}  ${ask.id}  ${ask.text}`).join("\n");
+}
+
+/**
+ * What the central pastes to answer asks: a quote per ask with its ordered ID, so sending it closes
+ * the ask, then an empty line to write under. A yes adds `Sí.` after each quote.
+ */
+export function answerText(asks: readonly QuestionId[], yes = false): string {
+	const lines = asks.flatMap((ask) => {
+		const quote = `> ${ask.ordinal}: ${ask.text}`;
+		return yes ? [quote, "Sí."] : [quote];
+	});
+	return `${lines.join("\n")}\n\n`;
 }

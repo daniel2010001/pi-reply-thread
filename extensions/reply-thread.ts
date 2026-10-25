@@ -1,9 +1,10 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";
-import { formatIndex, formatReplyPlain, widgetLines } from "../src/format.ts";
+import { formatIndex, formatPending, formatReplyPlain, widgetLines } from "../src/format.ts";
 import { findReply, noMatchMessage } from "../src/lookup.ts";
-import { buildThreads, type Thread } from "../src/threads.ts";
-import { OVERLAY_OPTIONS, RepliesView } from "./replies-view.ts";
+import { ASK_ENTRY, type AskAction, buildPending } from "../src/pending.ts";
+import { buildThreads } from "../src/threads.ts";
+import { type Central, OVERLAY_OPTIONS, RepliesView } from "./replies-view.ts";
 
 const WIDGET = "reply-thread";
 
@@ -12,13 +13,11 @@ const SHORTCUT = "alt+r";
 
 const DESCRIPTION = "List the replies of each prompt; /replies <P#.R# | entry ID> opens one in full";
 
-function threadsOf(ctx: ExtensionContext): Thread[] {
-	return buildThreads(ctx.sessionManager.getBranch());
-}
-
 function refreshWidget(ctx: ExtensionContext): void {
 	if (ctx.mode !== "tui") return;
-	const lines = widgetLines(threadsOf(ctx));
+	const branch = ctx.sessionManager.getBranch();
+	const threads = buildThreads(branch);
+	const lines = widgetLines(threads, buildPending(branch, threads));
 	if (!lines) {
 		ctx.ui.setWidget(WIDGET, undefined, { placement: "aboveEditor" });
 		return;
@@ -28,7 +27,7 @@ function refreshWidget(ctx: ExtensionContext): void {
 		(_tui: TUI, theme: Theme) => ({
 			render: (width: number) =>
 				lines.map((line, index) =>
-					truncateToWidth(index === 0 ? theme.fg("dim", line) : theme.fg("warning", line), width),
+					truncateToWidth(line.startsWith("⚠ ") ? theme.fg("warning", line) : theme.fg("dim", line), width),
 				),
 			invalidate: () => {},
 		}),
@@ -36,33 +35,53 @@ function refreshWidget(ctx: ExtensionContext): void {
 	);
 }
 
-/** Opens the index, or the reply `arg` names; plain text outside the TUI. */
-async function openReplies(ctx: ExtensionContext, arg: string): Promise<void> {
-	const threads = threadsOf(ctx);
-	const reply = arg ? findReply(threads, arg) : undefined;
-	if (arg && !reply) {
+/** Writes a central action to the branch, outside the model context, and returns the open asks after it. */
+function act(pi: ExtensionAPI, ctx: ExtensionContext, action: AskAction) {
+	pi.appendEntry(ASK_ENTRY, action);
+	refreshWidget(ctx);
+	return buildPending(ctx.sessionManager.getBranch());
+}
+
+/**
+ * Opens the central, or the reply `arg` names, or the Pending tab for `pending`; plain text outside
+ * the TUI. Answering in the central pastes the quotes into the editor.
+ */
+async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string): Promise<void> {
+	const branch = ctx.sessionManager.getBranch();
+	const threads = buildThreads(branch);
+	const pendingTab = arg.toLowerCase() === "pending";
+	const reply = arg && !pendingTab ? findReply(threads, arg) : undefined;
+	if (arg && !pendingTab && !reply) {
 		ctx.ui.notify(noMatchMessage(arg), "error");
 		return;
 	}
+	const pending = buildPending(branch, threads);
 	if (ctx.mode !== "tui") {
-		ctx.ui.notify(reply ? formatReplyPlain(reply) : formatIndex(threads), "info");
+		const text = pendingTab ? formatPending(pending) : reply ? formatReplyPlain(reply) : formatIndex(threads);
+		ctx.ui.notify(text, "info");
 		return;
 	}
-	await ctx.ui.custom<void>(
-		(tui, theme, keybindings, done) => new RepliesView(tui, theme, keybindings, threads, () => done(), reply),
+	const central: Central = {
+		pending,
+		act: (action) => act(pi, ctx, action),
+		tab: pendingTab ? "pending" : undefined,
+	};
+	const paste = await ctx.ui.custom<string | undefined>(
+		(tui, theme, keybindings, done) => new RepliesView(tui, theme, keybindings, threads, done, reply, central),
 		{ overlay: true, overlayOptions: OVERLAY_OPTIONS },
 	);
+	if (paste) ctx.ui.pasteToEditor(paste);
 }
 
 export default function replyThread(pi: ExtensionAPI): void {
 	pi.registerCommand("replies", {
 		description: DESCRIPTION,
-		handler: (args, ctx) => openReplies(ctx, args.trim()),
+		handler: (args, ctx) => openReplies(pi, ctx, args.trim()),
 	});
 
 	pi.registerShortcut(SHORTCUT, {
 		description: "Open the reply index (/replies)",
-		handler: (ctx) => openReplies(ctx, ""),
+		handler: (ctx) => openReplies(pi, ctx, ""),
 	});
 
 	pi.on("session_start", (_event, ctx) => refreshWidget(ctx));
