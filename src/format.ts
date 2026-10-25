@@ -32,9 +32,13 @@ function firstLine(text: string): string {
 	);
 }
 
+/** The first line of the prompt that started a thread. */
+export function promptLine(thread: Thread): string {
+	return thread.prompt === 0 ? "(before the first prompt)" : firstLine(thread.promptText);
+}
+
 export function threadRow(thread: Thread): string {
-	const prompt = thread.prompt === 0 ? "(before the first prompt)" : firstLine(thread.promptText);
-	return `P${thread.prompt} · ${formatTime(thread.timestamp)} · ${prompt}`;
+	return `P${thread.prompt} · ${formatTime(thread.timestamp)} · ${promptLine(thread)}`;
 }
 
 export function replyRow(reply: Reply): string {
