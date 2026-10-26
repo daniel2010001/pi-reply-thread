@@ -203,6 +203,7 @@ that look alike show as one row, on the newest of them (see [Repeated asks](#rep
 | `o` | Opens the reply that asks it; `Esc` comes back. |
 | `→` / `←` | Expands a row with `≈ N similar` to show its similar asks under it / collapses it again. |
 | `l` / `u` | Links the marked asks (2 or more) as one chain, or the selected row and its similar asks to the oldest of them / unlinks the chain. |
+| `Backspace` (`⌫`) | Undoes the last `x`, `l` or `u` (see [Undo](#undo)). |
 | `Tab` | Goes to the next tab: Pending → Replies → Answered → Pending. |
 | `?` | Shows a card with every key of each tab; `?` or `Esc` hides it. |
 | `Esc` | Closes. |
@@ -234,6 +235,19 @@ An ask closes only explicitly:
 - **Answered**: a later prompt of yours quotes it or cites its ordered or unique ID, which is what the
   pasted quote does. Gentle Agents wake messages do not count.
 - **Dismissed** with `x`.
+
+### Undo
+
+A dismiss, link or unlink you did by mistake is one key away. `Backspace` (`⌫`), in the Pending and
+Answered tabs, undoes the last action written since the overlay opened: a dismiss is reopened, a link
+unlinked, an unlink linked again, and `r` (see [Answered asks](#answered-asks)) dismissed again. Press
+it again to undo the action before that, newest first. One key is one step: `x` on several marked
+asks, `l` on a group and `l` on marked asks each undo as a whole. `f` is not an action and is not
+undone; with nothing left to undo, `Backspace` does nothing.
+
+Undo never deletes: it writes the opposite `reply-thread.ask` entry, so the branch keeps both. The
+steps last while the overlay is open; a new overlay starts with none, and `r` reopens an ask closed
+earlier. (`Ctrl+Z` would be the usual key, but Pi uses it to suspend the app on Linux.)
 
 A quote line, `> <ID>: <text>`, closes the ask whose text it carries: the open ask with the same text
 (compared as for [repeated asks](#repeated-asks), case and punctuation aside), the one the ID names
@@ -298,7 +312,7 @@ It is only a hint: nothing closes by itself. Answer the ask again, or press `x` 
 When more than 10 prompts have open asks, the older ones fold into an `Older (N)` row; `Enter`
 expands it.
 
-Dismiss and link are stored as `reply-thread.ask` custom entries on the session branch (outside the
+Dismiss, reopen and link are stored as `reply-thread.ask` custom entries on the session branch (outside the
 model context), so they follow `/resume` and branches like everything else.
 
 ### Answered asks
@@ -307,6 +321,11 @@ The **Answered** tab lists the closed asks, grouped under the prompt of their re
 first. Under each ask, `↳` names the prompt that answered it and the answer it gave, or `✕ dismissed`
 says you dismissed it. A closed chain shows once, on its newest ask, with `↺ <older IDs>`. `↑`/`↓`
 move and `Enter` or `o` opens the reply.
+
+`r` reopens the selected ask, answered or dismissed, and every ask of a closed chain: it writes a
+`reopen` entry for each, and the ask goes back to Pending, with `⚠` on its reply again. `Backspace`
+undoes `r` by dismissing the asks it reopened, so an ask first closed by an answer shows as dismissed
+then; either way it is closed again.
 
 ```
 ╭─ Answered ──────────────────────────────────────────────────── 1 answered · 1 dismissed ─╮

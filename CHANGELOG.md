@@ -58,3 +58,8 @@
   `## …?` section title.
 - `✓?` uses a looser similarity (40% shared words) than repeat groups (60%).
 - The recommended agent instruction asks the agent to review its earlier asks before writing the decision section: drop answered ones and repeat open ones word for word.
+- Undo: `Backspace` in the Pending and Answered tabs undoes the last `x`, `l`, `u` or `r` written
+  since the overlay opened, newest first, one key per step (a group or marked `l` undoes as a whole).
+  It writes the opposite entry (`reopen`, `unlink`, `link`, `dismiss`) and never deletes; `f` is not
+  undone. `r` in the Answered tab reopens the selected ask, every member of a closed chain, and it
+  returns to Pending. The `?` card lists both keys.

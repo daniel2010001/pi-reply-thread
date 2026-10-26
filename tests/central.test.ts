@@ -1062,3 +1062,271 @@ describe("ask mode in the central", () => {
 		}
 	});
 });
+
+describe("undo and reopen", () => {
+	const BACKSPACE = "\x7f";
+
+	/** `branch` with P1.R1.Q2 dismissed and a prompt that answers P1.R1.Q1 and P3.R1.Q1, on the Answered tab. */
+	const answered = () => {
+		branch.push(
+			askEntry({ action: "dismiss", ask: "a1b2c3d4.2" }),
+			user("> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nR: sí, las tres\n\n> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: "),
+		);
+		const view = central(branch, { tab: "replies" });
+		view.key("\t");
+		return view;
+	};
+
+	it("Backspace after x writes exactly a reopen for that ask and its row comes back", () => {
+		const view = central(branch);
+		const before = view.text(100);
+		view.key("x");
+		expect(view.text(100)).not.toEqual(before);
+		view.key(BACKSPACE);
+		expect(view.actions).toEqual([
+			{ action: "dismiss", ask: "c9d0e1f2.1" },
+			{ action: "reopen", ask: "c9d0e1f2.1" },
+		]);
+		expect(view.text(100)).toEqual(before);
+		expect(view.closed()).toBeUndefined();
+	});
+
+	it("two x then two Backspace undo both, newest first", () => {
+		const view = central(branch);
+		const before = view.text(100);
+		view.keys("x", "x");
+		expect(view.actions).toEqual([
+			{ action: "dismiss", ask: "c9d0e1f2.1" },
+			{ action: "dismiss", ask: "a1b2c3d4.1" },
+		]);
+		view.key(BACKSPACE);
+		expect(view.actions.slice(2)).toEqual([{ action: "reopen", ask: "a1b2c3d4.1" }]);
+		view.key(BACKSPACE);
+		expect(view.actions.slice(3)).toEqual([{ action: "reopen", ask: "c9d0e1f2.1" }]);
+		expect(view.text(100)).toEqual(before);
+	});
+
+	it("Backspace after x on marked asks reopens all of them as one step", () => {
+		const view = central(branch);
+		view.keys(" ", "tui.select.down", " ", "x", BACKSPACE);
+		expect(view.actions.slice(2)).toEqual([
+			{ action: "reopen", ask: "a1b2c3d4.2" },
+			{ action: "reopen", ask: "c9d0e1f2.1" },
+		]);
+		expect(view.text(100)[0]).toMatch(/ 2 open · 0 linked ─╮$/);
+	});
+
+	it("Backspace after a group l writes the unlink of every link it wrote, newest first, as one step", () => {
+		const repeats = [...branch, user("y ahora"), assistant("¿Borro las ramas viejas?", { id: "d0d0d0d4" })];
+		const view = central(repeats);
+		const before = view.text(100);
+		view.key("l");
+		expect(view.actions).toEqual([
+			{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" },
+			{ action: "link", ask: "d0d0d0d4.1", continues: "a1b2c3d4.1" },
+		]);
+		expect(view.text(100)[0]).toMatch(/ 2 open · 1 linked ─╮$/);
+		view.key(BACKSPACE);
+		expect(view.actions.slice(2)).toEqual([
+			{ action: "unlink", ask: "d0d0d0d4.1", continues: "a1b2c3d4.1" },
+			{ action: "unlink", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" },
+		]);
+		expect(view.text(100)).toEqual(before);
+		view.key(BACKSPACE);
+		expect(view.actions).toHaveLength(4);
+	});
+
+	it("Backspace after a marked l writes the unlink of every link it wrote, newest first, as one step", () => {
+		const view = central(branch);
+		view.keys(RIGHT, " ", "tui.select.down", " ", "tui.select.down", " ", "l");
+		expect(view.actions).toEqual([
+			{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.2" },
+			{ action: "link", ask: "a1b2c3d4.2", continues: "a1b2c3d4.1" },
+		]);
+		view.key(BACKSPACE);
+		expect(view.actions.slice(2)).toEqual([
+			{ action: "unlink", ask: "a1b2c3d4.2", continues: "a1b2c3d4.1" },
+			{ action: "unlink", ask: "c9d0e1f2.1", continues: "a1b2c3d4.2" },
+		]);
+		const rows = view.text(100);
+		expect(rows[0]).toMatch(/ 2 open · 0 linked ─╮$/);
+		expect(rows.some((line) => line.includes("↺"))).toBe(false);
+	});
+
+	it("Backspace after u writes the link back and the chain shows ↺ again", () => {
+		branch.push(askEntry({ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" }));
+		const view = central(branch);
+		const before = view.text(100);
+		view.key("u");
+		expect(view.actions).toEqual([{ action: "unlink", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" }]);
+		view.key(BACKSPACE);
+		expect(view.actions.slice(1)).toEqual([{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" }]);
+		expect(view.text(100)).toEqual(before);
+		expect(before[2]).toMatch(/  ↺ P1\.R1\.Q1 +│$/);
+	});
+
+	it("f is not undone and does not take an undo step", () => {
+		const view = central(branch);
+		view.keys("x", "f", BACKSPACE);
+		expect(view.formats).toEqual(["inline"]);
+		expect(view.actions).toEqual([
+			{ action: "dismiss", ask: "c9d0e1f2.1" },
+			{ action: "reopen", ask: "c9d0e1f2.1" },
+		]);
+		view.key(BACKSPACE);
+		expect(view.formats).toEqual(["inline"]);
+		expect(view.actions).toHaveLength(2);
+	});
+
+	it("Backspace with nothing to undo writes nothing and changes nothing", () => {
+		const view = central(branch);
+		const before = view.text(100);
+		view.key(BACKSPACE);
+		expect(view.actions).toEqual([]);
+		expect(view.text(100)).toEqual(before);
+		expect(view.closed()).toBeUndefined();
+		const done = answered();
+		const shown = done.text(100);
+		done.key(BACKSPACE);
+		expect(done.actions).toEqual([]);
+		expect(done.text(100)).toEqual(shown);
+	});
+
+	it("keeps the undo steps per overlay: a new one starts empty", () => {
+		const first = central(branch);
+		first.key("x");
+		const second = central(branch);
+		second.key(BACKSPACE);
+		expect(second.actions).toEqual([]);
+		expect(branch.filter((entry) => entry.type === "custom")).toHaveLength(1);
+		first.key(BACKSPACE);
+		expect(first.actions.at(-1)).toEqual({ action: "reopen", ask: "c9d0e1f2.1" });
+	});
+
+	it("r on an answered ask in Answered reopens it: back in Pending, ⚠ in Replies", () => {
+		const view = answered();
+		expect(view.text(100)[2]).toMatch(/^│ ›✓ P3\.R1\.Q1/);
+		view.key("r");
+		expect(view.actions).toEqual([{ action: "reopen", ask: "c9d0e1f2.1" }]);
+		expect(view.text(100)[0]).toMatch(/ 1 answered · 1 dismissed ─╮$/);
+		expect(view.text(100).some((line) => line.includes("P3.R1.Q1"))).toBe(false);
+		view.key("\t");
+		const pending = view.text(100);
+		expect(pending[0]).toMatch(/^╭─ Pending ─+ 1 open · 0 linked ─╮$/);
+		expect(pending[2]).toMatch(/^│ ›○ P3\.R1\.Q1  ¿Borro las tres ramas viejas\?/);
+		view.key("\t");
+		expect(view.text(100)).toContainEqual(
+			expect.stringMatching(/^│ .└ P3\.R1  c9d0e1f2  prompt +⚠ ¿Borro las tres ramas viejas\? +│$/),
+		);
+	});
+
+	it("r on a dismissed ask in Answered reopens it the same way", () => {
+		const view = answered();
+		view.keys("tui.select.down", "tui.select.down");
+		expect(view.text(100)[7]).toMatch(/^│ ›✓ P1\.R1\.Q2/);
+		view.key("r");
+		expect(view.actions).toEqual([{ action: "reopen", ask: "a1b2c3d4.2" }]);
+		expect(view.text(100)[0]).toMatch(/ 2 answered · 0 dismissed ─╮$/);
+		view.key("\t");
+		expect(view.text(100)).toContainEqual(expect.stringMatching(/^│ .○ P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/));
+		view.key("\t");
+		expect(view.text(100)).toContainEqual(
+			expect.stringMatching(/^│ .└ P1\.R1  a1b2c3d4  prompt +⚠ Necesito tu OK para pushear\. +│$/),
+		);
+	});
+
+	it("r on a chain row reopens every member, and Backspace dismisses every ask it reopened, newest first", () => {
+		branch.push(
+			askEntry({ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" }),
+			user("> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nR: no"),
+		);
+		const view = central(branch, { tab: "replies" });
+		view.key("\t");
+		expect(view.text(100)[2]).toMatch(/^│ ›✓ P3\.R1\.Q1  ¿Borro las tres ramas viejas\?  ↺ P1\.R1\.Q1 +│$/);
+		view.key("r");
+		expect(view.actions).toEqual([
+			{ action: "reopen", ask: "a1b2c3d4.1" },
+			{ action: "reopen", ask: "c9d0e1f2.1" },
+		]);
+		expect(view.text(100)[1]).toMatch(/^│ Nothing answered yet\. +│$/);
+		view.key(BACKSPACE);
+		expect(view.actions.slice(2)).toEqual([
+			{ action: "dismiss", ask: "c9d0e1f2.1" },
+			{ action: "dismiss", ask: "a1b2c3d4.1" },
+		]);
+		const rows = view.text(100);
+		expect(rows[0]).toMatch(/ 0 answered · 1 dismissed ─╮$/);
+		expect(rows[2]).toMatch(/^│ ›✓ P3\.R1\.Q1  ¿Borro las tres ramas viejas\?  ↺ P1\.R1\.Q1 +│$/);
+		expect(rows[3]).toMatch(/^│ {4}✕ dismissed +│$/);
+	});
+
+	it("Backspace after r on a single ask writes its dismiss and the ask is closed again", () => {
+		const view = answered();
+		view.keys("r", BACKSPACE);
+		expect(view.actions).toEqual([
+			{ action: "reopen", ask: "c9d0e1f2.1" },
+			{ action: "dismiss", ask: "c9d0e1f2.1" },
+		]);
+		expect(view.text(100)[0]).toMatch(/ 1 answered · 2 dismissed ─╮$/);
+	});
+
+	it("Backspace and r do nothing in the Replies tab, the viewer, the help card, and r nothing in Pending", () => {
+		const view = central(branch);
+		view.keys("x", "r");
+		expect(view.actions).toHaveLength(1);
+		view.key("\t");
+		const replies = view.text(100);
+		view.keys(BACKSPACE, "r");
+		expect(view.text(100)).toEqual(replies);
+		view.keys("tui.select.confirm", BACKSPACE, "r");
+		expect(view.text(100)[0]).toMatch(/^╭─ P3\.R1 /);
+		view.keys("tui.select.cancel", "\t", "\t", "o", BACKSPACE, "r");
+		expect(view.text(100)[0]).toMatch(/^╭─ P1\.R1 /);
+		view.keys("tui.select.cancel", "?", BACKSPACE, "r");
+		expect(view.text(100)[0]).toMatch(/^╭─ Keys /);
+		view.key("?");
+		expect(view.actions).toEqual([{ action: "dismiss", ask: "c9d0e1f2.1" }]);
+		expect(view.closed()).toBeUndefined();
+		view.key(BACKSPACE);
+		expect(view.actions.at(-1)).toEqual({ action: "reopen", ask: "c9d0e1f2.1" });
+	});
+
+	it("the key help lists ⌫ and r and still fits the cap on 8, 24 and 50 rows", () => {
+		const UNDO = /^│ {3}⌫ +undo the last action +│$/;
+		const REOPEN = /^│ {3}r +reopen the selected ask +│$/;
+		const wide = central(branch, { rows: 60 });
+		wide.key("?");
+		const rows = wide.text(100);
+		const answeredAt = rows.findIndex((line) => /^│ Answered +│$/.test(line));
+		const everyAt = rows.findIndex((line) => /^│ Every tab +│$/.test(line));
+		const pendingUndo = rows.findIndex((line) => UNDO.test(line));
+		expect(pendingUndo).toBeGreaterThan(0);
+		expect(pendingUndo).toBeLessThan(answeredAt);
+		const answeredKeys = rows.slice(answeredAt, everyAt);
+		expect(answeredKeys).toContainEqual(expect.stringMatching(REOPEN));
+		expect(answeredKeys).toContainEqual(expect.stringMatching(UNDO));
+		expect(wide.lines(100)[pendingUndo]).toContain(`${fg("accent")}⌫`);
+		for (const height of [8, 24, 50]) {
+			const cap = Math.min(height - 4, Math.floor(height * 0.9));
+			for (const width of [24, 80, 140]) {
+				const view = central(branch, { rows: height });
+				view.key("?");
+				const seen: string[] = [];
+				for (let press = 0; press < 40; press += 1) {
+					const lines = view.text(width);
+					expect(lines.length).toBeLessThanOrEqual(cap);
+					expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
+					expect(lines.at(-1)).toMatch(/^╰─/);
+					seen.push(...lines);
+					view.key("tui.select.down");
+				}
+				expect(seen.some((line) => line.startsWith("│   ⌫"))).toBe(true);
+				expect(seen.some((line) => line.startsWith("│   r "))).toBe(true);
+				if (width === 140) {
+					expect(seen).toContainEqual(expect.stringMatching(UNDO));
+					expect(seen).toContainEqual(expect.stringMatching(REOPEN));
+				}
+			}
+		}
+	});
+});

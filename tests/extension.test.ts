@@ -305,6 +305,45 @@ describe("pending central", () => {
 		expect(again.seen[0][0]).toMatch(/^╭─ Replies /);
 	});
 
+	it("Backspace writes the reopen of a dismiss as a reply-thread.ask entry and the widget shows the ask again", async () => {
+		const { commands, appended } = load();
+		const { ctx, widgets, seen } = fakeCtx(branch, "tui", ["x", "\x7f", "tui.select.cancel"]);
+		await commands.get("replies")!.handler("", ctx);
+		expect(appended).toEqual([
+			["reply-thread.ask", { action: "dismiss", ask: "a1b2c3d4.1" }],
+			["reply-thread.ask", { action: "reopen", ask: "a1b2c3d4.1" }],
+		]);
+		expect(seen.at(-1)?.[0]).toMatch(/^╭─ Pending ─+ 1 open · 0 linked ─╮$/);
+		expect(widgetText(widgets.at(-1)?.[1])).toEqual([
+			"P1 · 2 replies: R1 prompt ⚠ · R2 job: tests · alt+r",
+			"⚠ 1 pending · newest: P1.R1.Q1 Encontré dos opciones. ¿Cuál preferís? · alt+r",
+		]);
+	});
+
+	it("starts every overlay with nothing to undo", async () => {
+		const { commands, appended } = load();
+		const first = fakeCtx(branch, "tui", ["x", "tui.select.cancel"]);
+		await commands.get("replies")!.handler("", first.ctx);
+		const second = fakeCtx(branch, "tui", ["\t", "\t", "\x7f", "tui.select.cancel"]);
+		await commands.get("replies")!.handler("", second.ctx);
+		expect(second.seen[0][0]).toMatch(/^╭─ Replies /);
+		expect(appended).toEqual([["reply-thread.ask", { action: "dismiss", ask: "a1b2c3d4.1" }]]);
+	});
+
+	it("r in Answered writes a reopen as a reply-thread.ask entry and the ask is pending again", async () => {
+		const { commands, appended } = load();
+		branch.push(askEntry({ action: "dismiss", ask: "a1b2c3d4.1" }));
+		const { ctx, widgets } = fakeCtx(branch, "tui", ["\t", "r", "tui.select.cancel"]);
+		await commands.get("replies")!.handler("", ctx);
+		expect(appended).toEqual([["reply-thread.ask", { action: "reopen", ask: "a1b2c3d4.1" }]]);
+		expect(widgetText(widgets.at(-1)?.[1])).toContainEqual(
+			"⚠ 1 pending · newest: P1.R1.Q1 Encontré dos opciones. ¿Cuál preferís? · alt+r",
+		);
+		const again = fakeCtx(branch, "tui");
+		await commands.get("replies")!.handler("", again.ctx);
+		expect(again.seen[0][0]).toMatch(/^╭─ Pending ─+ 1 open · 0 linked ─╮$/);
+	});
+
 	it("counts a group of similar asks once in the widget, like the Pending title", async () => {
 		const { emit } = load();
 		const repeats = [

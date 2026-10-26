@@ -83,6 +83,14 @@ type PendingRow =
 /** One line of the Answered tab: a prompt header, a closed ask, or the line under it that tells how it closed. */
 type AnsweredRow = { kind: "prompt"; thread: Thread } | { kind: "ask"; row: ClosedAsk } | { kind: "how"; row: ClosedAsk };
 
+/** The entry that undoes an action: a dismiss reopens, a reopen dismisses, a link unlinks the same pair and back. */
+function inverse(action: AskAction): AskAction {
+	if (action.action === "link" || action.action === "unlink") {
+		return { action: action.action === "link" ? "unlink" : "link", ask: action.ask, continues: action.continues };
+	}
+	return { action: action.action === "dismiss" ? "reopen" : "dismiss", ask: action.ask };
+}
+
 /** The row `step` selectable rows away from `from`, stopping at either end. */
 function stepSelection<T>(rows: readonly T[], from: number, step: number, selectable: (row: T) => boolean): number {
 	let selected = from;
@@ -153,7 +161,8 @@ function scrollCells(theme: Theme, total: number, height: number, top: number): 
 /**
  * The thread list with a full-reply viewer: Enter opens a reply, Esc goes back, Esc on the list closes.
  * With a central, a Pending tab lists the open asks; Enter or `y` closes it with the text to paste,
- * in the format `f` toggles. An Answered tab lists the closed asks and how they closed.
+ * in the format `f` toggles. An Answered tab lists the closed asks and how they closed; `r` reopens one.
+ * Backspace in either tab undoes the newest action this overlay wrote.
  */
 export class RepliesView implements Component {
 	private readonly tui: TUI;
@@ -195,6 +204,8 @@ export class RepliesView implements Component {
 	/** Every open row in list order, a group's older members right after it, folded ones too. */
 	private listOrder: PendingAsk[] = [];
 	private readonly marked = new Set<string>();
+	/** The actions this overlay wrote and Backspace has not undone yet, one step per key, newest last. */
+	private readonly undoSteps: AskAction[][] = [];
 	private expanded = false;
 	private format: AnswerFormat = "lines";
 	/** The key help card, shown over the tab `?` opened it from. */
@@ -442,11 +453,24 @@ export class RepliesView implements Component {
 		return rows.flatMap((row) => [...row.chain, row]).sort((a, b) => b.seq - a.seq);
 	}
 
+	/** Writes the actions of one key, which Backspace can undo as one step. */
 	private act(actions: AskAction[]): void {
+		if (!actions.length) return;
+		this.write(actions);
+		this.undoSteps.push(actions);
+	}
+
+	private write(actions: AskAction[]): void {
 		const central = this.central as Central;
 		let state: AskState | undefined;
 		for (const action of actions) state = central.act(action);
 		if (state) this.setAsks(state);
+	}
+
+	/** Writes the inverse of every entry of the newest step, newest first; nothing when no step is left. */
+	private undo(): void {
+		const step = this.undoSteps.pop();
+		if (step) this.write(step.map(inverse).reverse());
 	}
 
 	/** Keys of the Pending tab; false when the key means nothing there. */
@@ -500,6 +524,7 @@ export class RepliesView implements Component {
 		} else if (matchesKey(data, "u") && ask?.continues) {
 			this.act([{ action: "unlink", ask: ask.id, continues: ask.continues }]);
 		} else if (matchesKey(data, "o") && ask) this.open(ask.reply, ask.thread);
+		else if (matchesKey(data, "backspace")) this.undo();
 		else return false;
 		return true;
 	}
@@ -525,7 +550,11 @@ export class RepliesView implements Component {
 		else if (kb.matches(data, "tui.select.pageDown")) move(page);
 		else if ((kb.matches(data, "tui.select.confirm") || matchesKey(data, "o")) && row?.kind === "ask") {
 			this.open(row.row.ask.reply, row.row.ask.thread);
-		} else return false;
+		} else if (matchesKey(data, "r") && row?.kind === "ask") {
+			// A chain closed together, so every member reopens.
+			this.act([...row.row.chain, row.row.ask].map((ask) => ({ action: "reopen", ask: ask.id })));
+		} else if (matchesKey(data, "backspace")) this.undo();
+		else return false;
 		return true;
 	}
 
@@ -887,10 +916,13 @@ export class RepliesView implements Component {
 			{ note: "✓? like <ID>: looks answered by that closed ask; it stays open until you answer it or press x.", indent: true },
 			["u", "unlink the ask from its chain"],
 			["o", "open the reply that asks it"],
+			["⌫", "undo the last action"],
 			"Replies",
 			["enter", "open the reply"],
 			"Answered",
 			["enter, o", "open the reply"],
+			["r", "reopen the selected ask"],
+			["⌫", "undo the last action"],
 			"Every tab",
 			["↑↓, pgup/pgdn", "move"],
 			["tab", "next tab: Pending → Replies → Answered"],
