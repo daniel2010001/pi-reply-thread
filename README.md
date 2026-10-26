@@ -164,10 +164,12 @@ the item, so any context goes before the question.
 When a reply needs anything from the user (a decision, a confirmation, an output, an action), end it
 with a `## Needs your decision` section: a numbered list, one item per ask. Each item is one
 question that ends with `?`: put any context before the question, never after it. One decision
-per item: split "Do we do A and B?" into two items. Never leave an
-ask in the middle of the reply or phrased without `?` ("Let me know when it is done" becomes
-"Can you tell me when it is done?"). Leave the section out when nothing is needed. Choices with
-fixed options still go through `ask_user_question` when it is available.
+per item: split "Do we do A and B?" into two items. Never leave an ask in the middle of the reply
+or phrased without `?` ("Let me know when it is done" becomes "Can you tell me when it is done?").
+Before writing the section, review the asks of your earlier replies in this conversation: drop the
+ones the user already answered, even without quoting them, and repeat a still-open one word for
+word instead of rewording it. Leave the section out when nothing is needed. Choices with fixed
+options still go through `ask_user_question` when it is available.
 ```
 
 ## Pending asks

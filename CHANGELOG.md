@@ -57,3 +57,4 @@
 - The demo session (`pnpm demo`) is in English, with the same two repeat groups, job notice and
   `## …?` section title.
 - `✓?` uses a looser similarity (40% shared words) than repeat groups (60%).
+- The recommended agent instruction asks the agent to review its earlier asks before writing the decision section: drop answered ones and repeat open ones word for word.
