@@ -249,3 +249,39 @@ describe("buildAsks: closed asks", () => {
 		expect(closed(entries)).toEqual([["P2.R1.Q1", ["P1.R1.Q1"], "P3"]]);
 	});
 });
+
+describe("buildAsks: answer text", () => {
+	const base = () => [user("hola"), assistant("¿Uno?\n\n¿Dos?", { id: "a1b2c3d4" })];
+	const answers = (prompt: string) =>
+		buildAsks([...base(), user(prompt)]).closed.map(({ ask, closedBy }) => [
+			ask.ordinal,
+			closedBy.kind === "answer" ? closedBy.text : closedBy.kind,
+		]);
+
+	it("lines: the R: line under the cited quote, trimmed, empty when nothing follows R:", () => {
+		expect(answers("> P1.R1.Q1: ¿Uno?\nR:  sí, dale  \n\n> P1.R1.Q2: ¿Dos?\nR: ")).toEqual([
+			["P1.R1.Q1", "sí, dale"],
+			["P1.R1.Q2", ""],
+		]);
+	});
+
+	it("inline: the text after → on the quote line, even when the next line is another quote with R:", () => {
+		expect(answers("> P1.R1.Q1: ¿Uno? → Yes.\n> P1.R1.Q2: ¿Dos? → no → nunca")).toEqual([
+			["P1.R1.Q1", "Yes."],
+			["P1.R1.Q2", "no → nunca"],
+		]);
+		expect(answers("> P1.R1.Q1: ¿Uno? → a\n> P1.R1.Q2: ¿Dos?\nR: b")).toEqual([
+			["P1.R1.Q1", "a"],
+			["P1.R1.Q2", "b"],
+		]);
+	});
+
+	it("a plain prompt: the first non-quote, non-empty line after the quote", () => {
+		expect(answers("> P1.R1.Q1: ¿Uno?\n> sigue la cita\n\nLa primera.\nY algo más.")).toEqual([["P1.R1.Q1", "La primera."]]);
+	});
+
+	it("a quote with nothing after it, or a prompt that only cites the ID: the prompt's first line", () => {
+		expect(answers("\n  dale con a1b2c3d4.2  \nsegunda línea")).toEqual([["P1.R1.Q2", "dale con a1b2c3d4.2"]]);
+		expect(answers("Contesto abajo.\n> P1.R1.Q1: ¿Uno?")).toEqual([["P1.R1.Q1", "Contesto abajo."]]);
+	});
+});

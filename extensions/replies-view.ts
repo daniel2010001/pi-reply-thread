@@ -40,7 +40,7 @@ const TRIGGER_COLOR: Record<TriggerKind, ThemeColor> = {
 
 type Hint = [key: string, action: string];
 
-export type Tab = "pending" | "replies";
+export type Tab = "pending" | "replies" | "answered";
 
 /** The pending central: the open asks, and how to dismiss or link them on the branch. */
 export interface Central {
@@ -59,6 +59,25 @@ export interface Central {
 
 /** One line of the Pending tab: a prompt header, an open ask, or the folded older prompts. */
 type PendingRow = { kind: "prompt"; thread: Thread } | { kind: "ask"; ask: PendingAsk } | { kind: "older"; count: number };
+
+/** One line of the Answered tab: a prompt header, a closed ask, or the line under it that tells how it closed. */
+type AnsweredRow = { kind: "prompt"; thread: Thread } | { kind: "ask"; row: ClosedAsk } | { kind: "how"; row: ClosedAsk };
+
+/** The row `step` selectable rows away from `from`, stopping at either end. */
+function stepSelection<T>(rows: readonly T[], from: number, step: number, selectable: (row: T) => boolean): number {
+	let selected = from;
+	let next = from;
+	for (let left = Math.abs(step); left > 0; ) {
+		const candidate = next + Math.sign(step);
+		if (candidate < 0 || candidate >= rows.length) break;
+		next = candidate;
+		if (selectable(rows[next])) {
+			selected = next;
+			left -= 1;
+		}
+	}
+	return selected;
+}
 
 /** The asks of a reply still open, and the closed ones with how they closed (`→ P13` or `dismissed`). */
 interface AskStatus {
@@ -114,7 +133,7 @@ function scrollCells(theme: Theme, total: number, height: number, top: number): 
 /**
  * The thread list with a full-reply viewer: Enter opens a reply, Esc goes back, Esc on the list closes.
  * With a central, a Pending tab lists the open asks; Enter or `s` closes it with the text to paste,
- * in the format `f` toggles.
+ * in the format `f` toggles. An Answered tab lists the closed asks and how they closed.
  */
 export class RepliesView implements Component {
 	private readonly tui: TUI;
@@ -139,6 +158,10 @@ export class RepliesView implements Component {
 	private closed: readonly ClosedAsk[] = [];
 	/** The closed row of each closed ask, chain members included. */
 	private readonly closings = new Map<string, ClosedAsk>();
+	private answeredRows: AnsweredRow[] = [];
+	private answeredSelected = 0;
+	private answeredTop = 0;
+	private closedOrdinalWidth = 0;
 	private pendingRows: PendingRow[] = [];
 	private pendingSelected = 0;
 	private pendingTop = 0;
@@ -238,11 +261,13 @@ export class RepliesView implements Component {
 			else return;
 		} else if (this.tab === "pending") {
 			if (!this.pendingInput(data)) return;
+		} else if (this.tab === "answered") {
+			if (!this.answeredInput(data)) return;
 		} else {
 			const page = this.listHeight() - 1;
 			if (kb.matches(data, "tui.select.cancel")) return this.done();
-			if (this.central && matchesKey(data, "tab")) this.tab = "pending";
-			if (kb.matches(data, "tui.select.confirm")) {
+			if (this.central && matchesKey(data, "tab")) this.tab = "answered";
+			else if (kb.matches(data, "tui.select.confirm")) {
 				const reply = this.rows[this.selected]?.reply;
 				if (!reply) return;
 				this.open(reply);
@@ -262,6 +287,25 @@ export class RepliesView implements Component {
 		this.closed = state.closed;
 		this.closings.clear();
 		for (const row of state.closed) for (const ask of [...row.chain, row.ask]) this.closings.set(ask.id, row);
+		this.closedOrdinalWidth = Math.max(0, ...state.closed.map((row) => row.ask.ordinal.length));
+		const groups = new Map<number, { thread: Thread; rows: ClosedAsk[] }>();
+		for (const row of state.closed) {
+			const group = groups.get(row.ask.thread.prompt) ?? { thread: row.ask.thread, rows: [] };
+			group.rows.push(row);
+			groups.set(row.ask.thread.prompt, group);
+		}
+		this.answeredRows = [...groups.values()]
+			.sort((a, b) => b.thread.prompt - a.thread.prompt)
+			.flatMap(({ thread, rows }) => [
+				{ kind: "prompt" as const, thread },
+				...rows.flatMap((row) => [
+					{ kind: "ask" as const, row },
+					{ kind: "how" as const, row },
+				]),
+			]);
+		const at = Math.min(this.answeredSelected, Math.max(0, this.answeredRows.length - 1));
+		const next = this.answeredRows.findIndex((row, index) => index >= at && row.kind === "ask");
+		this.answeredSelected = Math.max(0, next >= 0 ? next : this.answeredRows.findLastIndex((row) => row.kind === "ask"));
 		this.setPending(state.pending);
 	}
 
@@ -395,6 +439,31 @@ export class RepliesView implements Component {
 			this.act([{ action: "unlink", ask: ask.id, continues: ask.continues }]);
 		} else if (matchesKey(data, "o") && ask) this.open(ask.reply, ask.thread);
 		else return false;
+		return true;
+	}
+
+	// ── Answered ─────────────────────────────────────────────────────────────
+
+	/** Keys of the Answered tab; false when the key means nothing there. */
+	private answeredInput(data: string): boolean {
+		const kb = this.keybindings;
+		const page = this.listHeight() - 1;
+		const row = this.answeredRows[this.answeredSelected];
+		const move = (step: number) => {
+			this.answeredSelected = stepSelection(this.answeredRows, this.answeredSelected, step, (next) => next.kind === "ask");
+		};
+		if (kb.matches(data, "tui.select.cancel")) {
+			this.done();
+			return false;
+		}
+		if (matchesKey(data, "tab")) this.tab = "pending";
+		else if (kb.matches(data, "tui.select.up")) move(-1);
+		else if (kb.matches(data, "tui.select.down")) move(1);
+		else if (kb.matches(data, "tui.select.pageUp")) move(-page);
+		else if (kb.matches(data, "tui.select.pageDown")) move(page);
+		else if ((kb.matches(data, "tui.select.confirm") || matchesKey(data, "o")) && row?.kind === "ask") {
+			this.open(row.row.ask.reply, row.row.ask.thread);
+		} else return false;
 		return true;
 	}
 
@@ -631,6 +700,78 @@ export class RepliesView implements Component {
 		return [top, ...visible, this.bottom(this.pendingHints(), "", width)];
 	}
 
+	// ── Answered view ────────────────────────────────────────────────────────
+
+	/** `›✓ P12.R2.Q1  <ask>  ↺ <older members>`; the ask is cut first. */
+	private closedAskLine(row: ClosedAsk, selected: boolean, width: number): string {
+		const theme = this.theme;
+		const ordinal = row.ask.ordinal.padEnd(this.closedOrdinalWidth);
+		const room = width - 3 - ordinal.length - 2;
+		let suffix = row.chain.length ? `  ↺ ${row.chain.map((member) => member.ordinal).join(", ")}` : "";
+		if (room - visibleWidth(suffix) < MIN_ASK) suffix = "";
+		const text = truncateToWidth(row.ask.text, Math.max(0, room - visibleWidth(suffix)), "…");
+		const content = [
+			selected ? theme.fg("accent", "›") : " ",
+			theme.fg("success", "✓"),
+			" ",
+			theme.fg("accent", selected ? theme.bold(ordinal) : ordinal),
+			"  ",
+			theme.fg("text", text),
+			suffix ? theme.fg("muted", suffix) : "",
+		].join("");
+		const line = fit(content, width);
+		return selected ? theme.bg("selectedBg", line) : line;
+	}
+
+	/** `   ↳ P13  <answer text>`, or `   ✕ dismissed`, under the ordinal of the closed ask. */
+	private howLine(row: ClosedAsk, width: number): string {
+		const theme = this.theme;
+		const how = row.closedBy;
+		if (how.kind === "dismiss") return fit(`   ${theme.fg("dim", "✕ dismissed")}`, width);
+		const answer = how.text ? `  ${how.text}` : "";
+		return fit(`   ${theme.fg("muted", `↳ P${how.prompt.prompt}${answer}`)}`, width);
+	}
+
+	private renderAnswered(width: number): string[] {
+		const theme = this.theme;
+		const answered = this.closed.filter((row) => row.closedBy.kind === "answer").length;
+		const detail = this.closed.length ? `${answered} answered · ${this.closed.length - answered} dismissed` : "";
+		const top = this.top("Answered", detail, width);
+		const rows = this.answeredRows;
+		if (!rows.length) {
+			return [top, this.line(theme.fg("dim", "Nothing answered yet."), width), this.bottom([["esc", "close"]], "", width)];
+		}
+
+		const height = Math.min(this.listHeight(), rows.length);
+		const selected = this.answeredSelected;
+		// Keep the line that tells how the selected ask closed in view with it, when there is room.
+		const last = height >= 2 ? Math.min(selected + 1, rows.length - 1) : selected;
+		if (selected < this.answeredTop) this.answeredTop = selected;
+		if (last >= this.answeredTop + height) this.answeredTop = last - height + 1;
+		this.answeredTop = Math.max(0, Math.min(this.answeredTop, rows.length - height));
+		// Show the prompt above the first visible ask when the window starts right under it.
+		if (this.answeredTop > 0 && rows[this.answeredTop - 1].kind === "prompt" && last - this.answeredTop + 1 < height) {
+			this.answeredTop -= 1;
+		}
+		const cells = scrollCells(theme, rows.length, height, this.answeredTop);
+		const content = width - 4;
+		const visible = rows.slice(this.answeredTop, this.answeredTop + height).map((row, offset) => {
+			const text =
+				row.kind === "prompt"
+					? this.threadLine(row.thread, content)
+					: row.kind === "ask"
+						? this.closedAskLine(row.row, this.answeredTop + offset === selected, content)
+						: this.howLine(row.row, content);
+			return this.line(text, width, cells[offset]);
+		});
+		const hints: Hint[] = [
+			["↑↓", "move"],
+			["enter", "open"],
+			["esc", "close"],
+		];
+		return [top, ...visible, this.bottom(hints, "", width)];
+	}
+
 	// ── Viewer ───────────────────────────────────────────────────────────────
 
 	/**
@@ -719,7 +860,8 @@ export class RepliesView implements Component {
 
 	render(width: number): string[] {
 		if (this.reply && this.body) return this.renderViewer(width);
-		return this.tab === "pending" ? this.renderPending(width) : this.renderList(width);
+		if (this.tab === "pending") return this.renderPending(width);
+		return this.tab === "answered" ? this.renderAnswered(width) : this.renderList(width);
 	}
 
 	invalidate(): void {

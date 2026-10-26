@@ -35,8 +35,8 @@ export interface PendingAsk extends Ask {
 	suggestion?: Ask;
 }
 
-/** How a closed ask closed: a later prompt cited it, or the central dismissed it. */
-export type ClosedBy = { kind: "answer"; prompt: Thread } | { kind: "dismiss" };
+/** How a closed ask closed: a later prompt cited it, with the answer it gave, or the central dismissed it. */
+export type ClosedBy = { kind: "answer"; prompt: Thread; text: string } | { kind: "dismiss" };
 
 /** One closed row: an ask alone, or the newest member of a chain, with how the chain closed. */
 export interface ClosedAsk {
@@ -103,6 +103,34 @@ function cites(prompt: string, ask: Ask): boolean {
 	return ordinal.test(prompt) || unique.test(prompt);
 }
 
+function firstLine(text: string): string {
+	return (
+		text
+			.split("\n")
+			.map((line) => line.trim())
+			.find(Boolean) ?? ""
+	);
+}
+
+/**
+ * What a prompt answers to an ask it cites, trimmed: the `R:` line right under the cited quote, the text
+ * after `→` on the quote line, or the first line after the quote that is neither a quote nor empty.
+ * A prompt that cites the ask outside a quote, or has nothing after the quote, answers its first line.
+ */
+export function answerOf(prompt: string, ask: Ask): string {
+	const lines = prompt.split("\n").map((line) => line.trim());
+	const at = lines.findIndex((line) => cites(line, ask));
+	const quote = lines[at];
+	if (!quote?.startsWith(">")) return firstLine(prompt);
+	const under = lines[at + 1];
+	if (under?.startsWith("R:")) return under.slice(2).trim();
+	// The ask itself may hold a `→`, so take the one right after its text when the quote keeps it.
+	const known = quote.indexOf(`${ask.text} →`);
+	const arrow = known >= 0 ? known + ask.text.length + 1 : quote.indexOf("→");
+	if (arrow >= 0) return quote.slice(arrow + 1).trim();
+	return lines.slice(at + 1).find((line) => line && !line.startsWith(">")) ?? firstLine(prompt);
+}
+
 function isAction(data: unknown): data is AskAction {
 	const value = data as Partial<Record<string, unknown>> | undefined;
 	if (!value || typeof value.ask !== "string") return false;
@@ -147,7 +175,9 @@ export function buildAsks(entries: readonly SessionEntry[], threads = buildThrea
 		const thread = prompts.get(entry.id);
 		if (thread) {
 			for (const ask of asks.values()) {
-				if (!closed.has(ask.id) && cites(thread.promptText, ask)) closed.set(ask.id, { by: { kind: "answer", prompt: thread }, at });
+				if (!closed.has(ask.id) && cites(thread.promptText, ask)) {
+					closed.set(ask.id, { by: { kind: "answer", prompt: thread, text: answerOf(thread.promptText, ask) }, at });
+				}
 			}
 			continue;
 		}
