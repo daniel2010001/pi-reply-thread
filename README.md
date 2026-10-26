@@ -362,6 +362,37 @@ Every colour comes from the active Pi theme (frame `borderAccent`, prompts `user
 `muted`, similar asks and `✓?` `muted`, scrollbar `scrollbarThumb`/`scrollbarTrack`), so the overlay
 follows your theme, including Gentle Shell's.
 
+## When is it a bug?
+
+These are failures. If you see one, please
+[open an issue](https://github.com/daniel2010001/pi-reply-thread/issues) with your Pi version and the
+smallest reply and prompt that show it (remove anything private from them first):
+
+- **A cited ask stays open.** You sent a prompt quoting the ask (`> P12.R1.Q2: …`, with its ordered ID,
+  its entry ID or its text), and the ask is still in Pending.
+- **An ask appears that is not one.** A line from a code block, inline code, a blockquote or a table is
+  listed, or a line that is not in the reply at all.
+- **A decision-section item is missing or misnumbered.** In the default mode, an item of the
+  `## Needs your decision` list is not listed, or its `Q#` differs from its item number.
+- **A key changes the wrong ask.** `x`, `l`, `u`, `r` or `Backspace` changes an ask other than the one
+  you acted on, or Enter/`y` pastes another ask.
+- **The overlay or the widget does not fit.** A line runs past the screen width, the card is taller
+  than the screen, or the bottom border with the keys is cut off.
+- **Something reaches the model.** The package never adds messages to the model's context; only the
+  prompt you send (a pasted quote, for example) does.
+- **The state changes on its own.** After `/resume`, a restart or switching branches, an ask closes or
+  reopens without anything new on that branch.
+- **Pi shows an error from the extension or crashes.**
+
+These work as designed and are not bugs:
+
+- In the default mode, a question outside the decision section is not tracked; the reply viewer says
+  so. Use `--reply-thread-asks all` to track every question.
+- An answer that does not quote the ask (by ID or text) does not close it. Close it with `x`.
+- A group row answers only its newest ask; press `l` first to close the group together.
+- A reworded repeat that shares few words is neither grouped nor marked `✓?`.
+- `/replies` only runs with an empty editor, so while the agent works use `Alt+R`.
+
 ## Develop
 
 ```sh

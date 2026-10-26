@@ -63,3 +63,4 @@
   It writes the opposite entry (`reopen`, `unlink`, `link`, `dismiss`) and never deletes; `f` is not
   undone. `r` in the Answered tab reopens the selected ask, every member of a closed chain, and it
   returns to Pending. The `?` card lists both keys.
+- README: "When is it a bug?" lists the failures to report and what works as designed.
