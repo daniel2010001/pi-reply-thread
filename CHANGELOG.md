@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-26)
 
 - Group every final reply of a session branch under the prompt that started it, with an ordered ID
   (`P12.R2`) and a unique ID (the session entry ID).

@@ -30,6 +30,8 @@ Which questions count as asks? See [How asks are found](#how-asks-are-found): wh
 ## Install
 
 ```sh
+pi install npm:pi-reply-thread
+# or from GitHub
 pi install git:github.com/daniel2010001/pi-reply-thread
 ```
 
