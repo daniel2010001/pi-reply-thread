@@ -4,10 +4,37 @@ import { buildThreads, type Reply, type Thread } from "./threads.ts";
 /** Custom entry type of the central's dismiss and link actions, written with `pi.appendEntry`. */
 export const ASK_ENTRY = "reply-thread.ask";
 
-/** `ask` is the newer question, `continues` the older one it repeats. Both are unique question IDs. */
+/** Custom entry type of a `/replies triage` run: the model and its proposals, written with `pi.appendEntry`. */
+export const TRIAGE_ENTRY = "reply-thread.triage";
+
+/**
+ * `ask` is the newer question, `continues` the older one it repeats. Both are unique question IDs.
+ * `answer` closes an ask as answered by the prompt with that entry ID; `reject` and `restore` hide and
+ * show one triage proposal of the ask, named by `proposalKey`.
+ */
 export type AskAction =
 	| { action: "dismiss" | "reopen"; ask: string }
-	| { action: "link" | "unlink"; ask: string; continues: string };
+	| { action: "link" | "unlink"; ask: string; continues: string }
+	| { action: "answer"; ask: string; prompt: string; text: string }
+	| { action: "reject" | "restore"; ask: string; proposal: string };
+
+/**
+ * A triage proposal as stored, by unique IDs: a later prompt (entry ID) answers `ask` with `quote`, or
+ * `ask` asks the same as the older `as`. Only a proposal; nothing closes or links until it is accepted.
+ */
+export type Proposal =
+	| { kind: "answered"; ask: string; prompt: string; quote: string }
+	| { kind: "same"; ask: string; as: string };
+
+/** A stored proposal that still applies, resolved on the branch. */
+export type LiveProposal =
+	| { kind: "answered"; key: string; ask: Ask; prompt: Thread; quote: string }
+	| { kind: "same"; key: string; ask: Ask; as: Ask };
+
+/** What `reject` and `restore` name: `answered:<prompt entry ID>` or `same:<older ask ID>`. */
+export function proposalKey(proposal: Proposal): string {
+	return proposal.kind === "answered" ? `answered:${proposal.prompt}` : `same:${proposal.as}`;
+}
 
 /** The IDs of one open ask of a reply. */
 export interface QuestionId {
@@ -35,6 +62,8 @@ export interface PendingAsk extends Ask {
 	suggestion?: Ask;
 	/** The newest closed ask, chain members too, older than this row and like its text. Never closes it. */
 	looksAnswered?: Ask;
+	/** Triage proposals for this row's asks that still apply and were not rejected, in triage order. */
+	proposals?: LiveProposal[];
 }
 
 /** How a closed ask closed: a later prompt cited it, with the answer it gave, or the central dismissed it. */
@@ -191,7 +220,24 @@ function isAction(data: unknown): data is AskAction {
 	const value = data as Partial<Record<string, unknown>> | undefined;
 	if (!value || typeof value.ask !== "string") return false;
 	if (value.action === "dismiss" || value.action === "reopen") return true;
+	if (value.action === "answer") return typeof value.prompt === "string" && typeof value.text === "string";
+	if (value.action === "reject" || value.action === "restore") return typeof value.proposal === "string";
 	return (value.action === "link" || value.action === "unlink") && typeof value.continues === "string";
+}
+
+function isProposal(data: unknown): data is Proposal {
+	const value = data as Partial<Record<string, unknown>> | null | undefined;
+	if (!value || typeof value !== "object" || typeof value.ask !== "string") return false;
+	if (value.kind === "answered") return typeof value.prompt === "string" && typeof value.quote === "string";
+	return value.kind === "same" && typeof value.as === "string";
+}
+
+/** The proposals of the newest triage entry, those with a valid shape. */
+function triageProposals(entries: readonly SessionEntry[]): Proposal[] {
+	const entry = entries.findLast((one) => one.type === "custom" && one.customType === TRIAGE_ENTRY);
+	if (entry?.type !== "custom") return [];
+	const proposals = (entry.data as { proposals?: unknown } | undefined)?.proposals;
+	return Array.isArray(proposals) ? proposals.filter(isProposal) : [];
 }
 
 /**
@@ -221,6 +267,8 @@ export function buildAsks(entries: readonly SessionEntry[], threads = buildThrea
 	const closed = new Map<string, { by: ClosedBy; at: number }>();
 	/** The older ask each ask continues. */
 	const continues = new Map<string, string>();
+	/** The proposal keys rejected for each ask. */
+	const rejected = new Map<string, Set<string>>();
 
 	for (const [at, entry] of entries.entries()) {
 		const found = replies.get(entry.id);
@@ -259,6 +307,13 @@ export function buildAsks(entries: readonly SessionEntry[], threads = buildThrea
 		if (!ask) continue;
 		if (action.action === "dismiss") {
 			if (!closed.has(ask.id)) closed.set(ask.id, { by: { kind: "dismiss" }, at });
+		} else if (action.action === "answer") {
+			const prompt = prompts.get(action.prompt);
+			if (prompt && !closed.has(ask.id)) closed.set(ask.id, { by: { kind: "answer", prompt, text: action.text }, at });
+		} else if (action.action === "reject") {
+			rejected.set(ask.id, new Set([...(rejected.get(ask.id) ?? []), action.proposal]));
+		} else if (action.action === "restore") {
+			rejected.get(ask.id)?.delete(action.proposal);
 		} else if (action.action === "reopen") closed.delete(ask.id);
 		else if (action.action === "unlink") {
 			if (continues.get(ask.id) === action.continues) continues.delete(ask.id);
@@ -297,6 +352,25 @@ export function buildAsks(entries: readonly SessionEntry[], threads = buildThrea
 		row.looksAnswered = closedAsks.findLast((other) => other.seq < row.seq && looksLikeAsk(other.text, row.text));
 		if (row.chain.length) continue;
 		row.suggestion = openAsks.findLast((other) => other.seq < row.seq && similarAsks(other.text, row.text));
+	}
+
+	// A proposal shows on the open row that holds its ask, unless rejected or no longer true.
+	const rowOf = new Map(rows.flatMap((row) => [...row.chain, row].map((member) => [member.id, row] as const)));
+	for (const proposal of triageProposals(entries)) {
+		const row = rowOf.get(proposal.ask);
+		const ask = asks.get(proposal.ask);
+		const key = proposalKey(proposal);
+		if (!row || !ask || rejected.get(ask.id)?.has(key)) continue;
+		let live: LiveProposal | undefined;
+		if (proposal.kind === "answered") {
+			const prompt = prompts.get(proposal.prompt);
+			if (prompt) live = { kind: "answered", key, ask, prompt, quote: proposal.quote };
+		} else {
+			const other = rowOf.get(proposal.as);
+			const as = asks.get(proposal.as);
+			if (as && other && other !== row) live = { kind: "same", key, ask, as };
+		}
+		if (live) row.proposals = [...(row.proposals ?? []), live];
 	}
 	return { pending: rows, closed: done };
 }

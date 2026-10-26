@@ -12,7 +12,7 @@ import {
 	similarGroups,
 } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
-import { askEntry, assistant, resetIds, user, wake } from "./helpers.ts";
+import { askEntry, assistant, customEntry, resetIds, user, wake } from "./helpers.ts";
 
 beforeEach(() => resetIds());
 
@@ -648,5 +648,81 @@ describe("buildAsks: looks answered", () => {
 		expect(group.map((row) => row.ordinal)).toEqual(["P2.R1.Q1", "P3.R1.Q1"]);
 		expect(looksAnsweredBy(group)?.ordinal).toBe("P1.R1.Q1");
 		expect(looksAnsweredBy(group.slice(1))).toBeUndefined();
+	});
+});
+
+describe("buildAsks: triage", () => {
+	/** P1 asks two things, P2 answers the first without quoting it, P2.R1 asks the first again. */
+	const base = () => [
+		user("hola", "bbbbbbb0"),
+		assistant("¿Arrancamos con T14?\n\n¿Usamos Piper?", { id: "aaaaaaa1" }),
+		user("vamos con T14, dale", "bbbbbbb1"),
+		assistant("¿Empezamos con el núcleo?", { id: "aaaaaaa2" }),
+	];
+	const answered = { kind: "answered", ask: "aaaaaaa1.1", prompt: "bbbbbbb1", quote: "vamos con T14" };
+	const same = { kind: "same", ask: "aaaaaaa2.1", as: "aaaaaaa1.1" };
+	const triage = (...proposals: unknown[]) => customEntry("reply-thread.triage", { model: "test/model", proposals });
+	const shown = (entries: Parameters<typeof buildAsks>[0]) =>
+		buildAsks(entries).pending.flatMap((row) =>
+			(row.proposals ?? []).map((proposal) =>
+				proposal.kind === "answered"
+					? [row.ordinal, proposal.key, proposal.ask.ordinal, `P${proposal.prompt.prompt}`, proposal.quote]
+					: [row.ordinal, proposal.key, proposal.ask.ordinal, proposal.as.ordinal],
+			),
+		);
+
+	it("closes an ask an answer action names, as answered by that prompt with that text", () => {
+		const entries = [...base(), askEntry({ action: "answer", ask: "aaaaaaa1.1", prompt: "bbbbbbb1", text: "vamos con T14" })];
+		const [row] = buildAsks(entries).closed;
+		expect(row.ask.ordinal).toBe("P1.R1.Q1");
+		expect(row.closedBy).toMatchObject({ kind: "answer", text: "vamos con T14", prompt: { prompt: 2, entryId: "bbbbbbb1" } });
+		expect(buildPending(entries).map((ask) => ask.ordinal)).toEqual(["P1.R1.Q2", "P2.R1.Q1"]);
+	});
+
+	it("ignores an answer action for a prompt that is not on the branch, and reopens an answered ask", () => {
+		const unknown = [...base(), askEntry({ action: "answer", ask: "aaaaaaa1.1", prompt: "ffffffff", text: "sí" })];
+		expect(buildAsks(unknown).closed).toEqual([]);
+		const reopened = [
+			...base(),
+			askEntry({ action: "answer", ask: "aaaaaaa1.1", prompt: "bbbbbbb1", text: "sí" }),
+			askEntry({ action: "reopen", ask: "aaaaaaa1.1" }),
+		];
+		expect(buildAsks(reopened).closed).toEqual([]);
+	});
+
+	it("shows the proposals of the newest triage entry on the rows they name", () => {
+		expect(shown([...base(), triage(answered, same)])).toEqual([
+			["P1.R1.Q1", "answered:bbbbbbb1", "P1.R1.Q1", "P2", "vamos con T14"],
+			["P2.R1.Q1", "same:aaaaaaa1.1", "P2.R1.Q1", "P1.R1.Q1"],
+		]);
+		expect(shown([...base(), triage(answered, same), triage(same)])).toEqual([["P2.R1.Q1", "same:aaaaaaa1.1", "P2.R1.Q1", "P1.R1.Q1"]]);
+		expect(shown(base())).toEqual([]);
+	});
+
+	it("hides a rejected proposal and shows it again once restored", () => {
+		const rejected = [...base(), triage(answered, same), askEntry({ action: "reject", ask: "aaaaaaa1.1", proposal: "answered:bbbbbbb1" })];
+		expect(shown(rejected)).toEqual([["P2.R1.Q1", "same:aaaaaaa1.1", "P2.R1.Q1", "P1.R1.Q1"]]);
+		expect(shown([...rejected, askEntry({ action: "restore", ask: "aaaaaaa1.1", proposal: "answered:bbbbbbb1" })])).toHaveLength(2);
+		const otherKey = [...base(), triage(answered), askEntry({ action: "reject", ask: "aaaaaaa1.1", proposal: "answered:bbbbbbb0" })];
+		expect(shown(otherKey)).toHaveLength(1);
+	});
+
+	it("keeps a rejection when a new triage proposes the same thing again", () => {
+		const entries = [...base(), triage(same), askEntry({ action: "reject", ask: "aaaaaaa2.1", proposal: "same:aaaaaaa1.1" }), triage(same)];
+		expect(shown(entries)).toEqual([]);
+	});
+
+	it("drops a proposal once its ask closes, and a same proposal once the other ask closes or both share a chain", () => {
+		const dismissedOld = [...base(), triage(answered, same), askEntry({ action: "dismiss", ask: "aaaaaaa1.1" })];
+		expect(shown(dismissedOld)).toEqual([]);
+		const linked = [...base(), triage(same), askEntry({ action: "link", ask: "aaaaaaa2.1", continues: "aaaaaaa1.1" })];
+		expect(shown(linked)).toEqual([]);
+	});
+
+	it("shows a chain member's proposal on its chain row, and drops proposals for prompts or asks off the branch", () => {
+		const entries = [...base(), askEntry({ action: "link", ask: "aaaaaaa2.1", continues: "aaaaaaa1.1" }), triage(answered)];
+		expect(shown(entries)).toEqual([["P2.R1.Q1", "answered:bbbbbbb1", "P1.R1.Q1", "P2", "vamos con T14"]]);
+		const stale = [...base(), triage({ ...answered, prompt: "ffffffff" }, { ...same, as: "ffffffff.1" }, { kind: "other" }, "x")];
+		expect(shown(stale)).toEqual([]);
 	});
 });
