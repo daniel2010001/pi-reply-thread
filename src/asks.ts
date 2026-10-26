@@ -35,13 +35,16 @@ function isAsk(line: string): boolean {
 /**
  * Lines of a Markdown reply that wait on the user: questions and decision markers.
  * Fenced code, blockquotes, table rows and inline code are not prose and never count.
- * A heading with a marker asks only while its section, until the next heading, has no ask of its own.
+ * In a section headed by a marker, until the next heading, every list item asks, even without `?`.
+ * The marker heading asks only while its section has no ask of its own.
  */
 export function detectOpenAsks(text: string): string[] {
 	const asks: string[] = [];
 	let fence: string | undefined;
 	/** The marker heading of the current section, while it is taken as an ask. */
 	let section: string | undefined;
+	/** Whether the current section is headed by a marker, so its list items ask. */
+	let marker = false;
 
 	for (const raw of text.split("\n")) {
 		const line = raw.trim();
@@ -60,10 +63,13 @@ export function detectOpenAsks(text: string): string[] {
 
 		// A heading that ends in `?` titles a section ("## Why not a model?"); only a marker in it asks.
 		const heading = HEADING.test(line);
-		if (heading) section = undefined;
 		const cleaned = stripEmphasis(line.replace(HEADING, "").replace(BULLET, "")).trim();
+		if (heading) {
+			section = undefined;
+			marker = MARKERS.test(cleaned.replace(CODE_SPAN, "").replace(QUOTED, ""));
+		}
 		if (!cleaned) continue;
-		if (heading ? !MARKERS.test(cleaned.replace(CODE_SPAN, "").replace(QUOTED, "")) : !isAsk(cleaned)) continue;
+		if (heading ? !marker : !isAsk(cleaned) && !(marker && BULLET.test(line))) continue;
 		// The section has an ask of its own, so its marker heading only titles it.
 		if (section !== undefined) {
 			asks.splice(asks.indexOf(section), 1);

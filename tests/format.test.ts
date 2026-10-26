@@ -223,9 +223,9 @@ describe("answerText", () => {
 		expect(answerText(asks, false, "lines")).toBe(answerText(asks));
 	});
 
-	it("lines with a yes: `R: Sí.` under each quote", () => {
-		expect(answerText(asks.slice(0, 1), true)).toBe("> P13.R1.Q1: ¿Los borro?\nR: Sí.");
-		expect(answerText(asks, true, "lines")).toBe("> P13.R1.Q1: ¿Los borro?\nR: Sí.\n\n> P13.R2.Q1: ¿Pusheo?\nR: Sí.");
+	it("lines with a yes: `R: Yes.` under each quote", () => {
+		expect(answerText(asks.slice(0, 1), true)).toBe("> P13.R1.Q1: ¿Los borro?\nR: Yes.");
+		expect(answerText(asks, true, "lines")).toBe("> P13.R1.Q1: ¿Los borro?\nR: Yes.\n\n> P13.R2.Q1: ¿Pusheo?\nR: Yes.");
 	});
 
 	it("inline: the answer on the quote line after `→ `, one ask per line, no trailing newline", () => {
@@ -233,9 +233,9 @@ describe("answerText", () => {
 		expect(answerText(asks, false, "inline")).toBe("> P13.R1.Q1: ¿Los borro? → \n> P13.R2.Q1: ¿Pusheo? → ");
 	});
 
-	it("inline with a yes: `→ Sí.` on each quote line", () => {
-		expect(answerText(asks.slice(0, 1), true, "inline")).toBe("> P13.R1.Q1: ¿Los borro? → Sí.");
-		expect(answerText(asks, true, "inline")).toBe("> P13.R1.Q1: ¿Los borro? → Sí.\n> P13.R2.Q1: ¿Pusheo? → Sí.");
+	it("inline with a yes: `→ Yes.` on each quote line", () => {
+		expect(answerText(asks.slice(0, 1), true, "inline")).toBe("> P13.R1.Q1: ¿Los borro? → Yes.");
+		expect(answerText(asks, true, "inline")).toBe("> P13.R1.Q1: ¿Los borro? → Yes.\n> P13.R2.Q1: ¿Pusheo? → Yes.");
 	});
 });
 

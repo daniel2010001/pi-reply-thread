@@ -129,10 +129,10 @@ export function answerFormat(entries: readonly SessionEntry[]): AnswerFormat {
  * What the central pastes to answer asks: a quote per ask with its ordered ID, so sending it closes
  * the ask, and room for the answer right after it, with no trailing newline so the cursor waits there.
  * `lines` puts `R: ` under each quote and an empty line between asks; `inline` puts `→ ` on the quote
- * line, one ask per line. A yes writes `Sí.` as the answer.
+ * line, one ask per line. A yes writes `Yes.` as the answer.
  */
 export function answerText(asks: readonly QuestionId[], yes = false, format: AnswerFormat = "lines"): string {
-	const answer = yes ? "Sí." : "";
+	const answer = yes ? "Yes." : "";
 	const quotes = asks.map((ask) => `> ${ask.ordinal}: ${ask.text}`);
 	if (format === "inline") return quotes.map((quote) => `${quote} → ${answer}`).join("\n");
 	return quotes.map((quote) => `${quote}\nR: ${answer}`).join("\n\n");

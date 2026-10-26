@@ -162,7 +162,7 @@ describe("detectOpenAsks", () => {
 	});
 
 	it("still takes a decision marker in a heading as an ask when no ask is under it", () => {
-		expect(detectOpenAsks("## Needs your decision\n\n- A or B")).toEqual(["Needs your decision"]);
+		expect(detectOpenAsks("## Needs your decision\n\nPick when you can.")).toEqual(["Needs your decision"]);
 		expect(detectOpenAsks("Done.\n\n## Necesito tu OK")).toEqual(["Necesito tu OK"]);
 		expect(detectOpenAsks("## Needs your decision\n\n```\nship it?\n```\n> Merge?\n| A? |")).toEqual(["Needs your decision"]);
 	});
@@ -178,11 +178,39 @@ describe("detectOpenAsks", () => {
 
 	it("does not count an ask under a later heading, of any level, for an earlier marker heading", () => {
 		expect(
-			detectOpenAsks(["## Needs your decision", "- A or B", "", "### Details", "", "¿Seguimos?"].join("\n")),
+			detectOpenAsks(["## Needs your decision", "Pick one.", "", "### Details", "", "¿Seguimos?"].join("\n")),
 		).toEqual(["Needs your decision", "¿Seguimos?"]);
 		expect(
-			detectOpenAsks(["# Necesito tu OK", "- A", "## ¿Por qué?", "Porque sí.", "## Needs your decision", "- Ship it?"].join("\n")),
+			detectOpenAsks(["# Necesito tu OK", "Para pushear.", "## ¿Por qué?", "Porque sí.", "## Needs your decision", "- Ship it?"].join("\n")),
 		).toEqual(["Necesito tu OK", "Ship it?"]);
 	});
-});
 
+	it("takes every bullet or numbered item of a marker section as an ask, even without ?, and not the heading", () => {
+		expect(
+			detectOpenAsks(
+				[
+					"Tests are green.",
+					"",
+					"## Needs your decision",
+					"",
+					"1. **Merge** `feat/x` into main",
+					"2) Keep the old name",
+					"- [ ] Push the tag",
+					"* A or B",
+					"+ Ship it?",
+					"  - Nested: drop the draft",
+					"Plain text under the heading.",
+				].join("\n"),
+			),
+		).toEqual(["Merge `feat/x` into main", "Keep the old name", "Push the tag", "A or B", "Ship it?", "Nested: drop the draft"]);
+		expect(detectOpenAsks("### **Necesito tu decisión**\n\n- Borrar las ramas\n- Borrar las ramas")).toEqual(["Borrar las ramas"]);
+	});
+
+	it("does not take an item under a later non-marker heading, nor items of a plain section, nor one in code", () => {
+		expect(
+			detectOpenAsks(
+				["## Summary", "- Tests pass", "## Needs your decision", "- Merge now", "```", "- not an item", "```", "### Details", "- A detail", "## Next", "1. Release"].join("\n"),
+			),
+		).toEqual(["Merge now"]);
+	});
+});

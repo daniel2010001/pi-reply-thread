@@ -11,12 +11,12 @@ place, where you answer them by pasting a quote.
 
 ```
 ╭─ Replies ──────────────────────────────────────── 3 prompts · 6 replies ─╮
-│ ▌P12  buscá si existe algo así                                     12:04 │
-│ ›├ P12.R1  a1b2c3d4  prompt        ⚠ Encontré dos opciones. ¿Cuál…       │
+│ ▌P12  look for something like this                                 12:04 │
+│ ›├ P12.R1  a1b2c3d4  prompt        ⚠ I found two options. Which one…     │
 │  ├ P12.R2  e5f6a7b8  job: tests                                          │
 │  └ P12.R3  c9d0e1f2  worker: docs                                        │
-│ ▌P11  arreglá el widget                                            11:40 │
-│  └ P11.R1  77aa01bc  prompt                                              │
+│ ▌P11  clean up the old branches                                    11:40 │
+│  └ P11.R1  77aa01bc  prompt        ✓                                     │
 ╰─ ↑↓ move · enter open · esc close ───────────────────────────────────────╯
 ```
 
@@ -41,7 +41,7 @@ gsh -- -e ./extensions/reply-thread.ts   # Gentle Shell
 
 | Command | What it does |
 |---|---|
-| `/replies` or `Alt+R` | Opens the overlay on **Pending** while any ask is open, else on **Replies** (the index of the current branch, newest prompt first). `Tab` switches. |
+| `/replies` or `Alt+R` | Opens the overlay on **Pending** while any ask is open, else on **Replies** (the index of the current branch, newest prompt first). `Tab` cycles Pending → Replies → Answered. |
 | `/replies pending` | Opens the **Pending** tab, even when nothing waits. |
 | `/replies P12.R1` | Opens one reply in full by its ordered ID (case-insensitive). |
 | `/replies a1b2c3d4` | Opens one reply in full by its entry ID. |
@@ -49,10 +49,10 @@ gsh -- -e ./extensions/reply-thread.ts   # Gentle Shell
 
 In the index, `↑`/`↓` move, `Enter` opens a reply, `Esc` closes. In the reply viewer, `↑`/`↓`
 scroll, `PgUp`/`PgDn` or `Space` page, `Home`/`End` jump, and `Esc` or `q` goes back. A reply
-opened by ID closes on `Esc`.
+opened by ID closes on `Esc`. In any tab, `?` shows a card with every key; `?` or `Esc` hides it.
 
 Outside the interactive TUI (print or RPC mode), `/replies` and `Alt+R` send the index or the reply as plain
-text, and `/replies pending` sends the open asks, one per line (`P12.R1.Q1  a1b2c3d4.1  ¿Cuál preferís?`),
+text, and `/replies pending` sends the open asks, one per line (`P12.R1.Q1  a1b2c3d4.1  Which one do you prefer?`),
 or `Nothing waits on you.`
 
 ### Reply IDs
@@ -81,32 +81,40 @@ That message is not counted as a prompt, so those replies stay under the prompt 
 
 ### Replies that wait on you
 
-A reply is marked `⚠` when one of its lines asks you something:
+A line of a reply is an ask when it asks you something:
 
-- the line ends with `?` (for example `¿Cuál preferís?`), or
+- the line ends with `?` (for example `Which one do you prefer?` or `¿Cuál preferís?`), or
 - it contains a decision marker: `needs your decision`, `decision needed`, `waiting on you`,
-  `waiting for you`, `necesito que decidas`, `necesito tu OK`, `necesito tu decisión`,
+  `waiting for you`, and the Spanish `necesito que decidas`, `necesito tu OK`, `necesito tu decisión`,
   `necesito tu confirmación`. A marker inside double quotes (`"…"`, `“…”`, `«…»`) is only being
-  mentioned and does not count.
+  mentioned and does not count, or
+- it is a list item (bullet or numbered) in a section headed by a decision marker
+  (`## Needs your decision`), up to the next heading, even without `?`.
 
 Code blocks, inline code, blockquotes and table rows are ignored. A heading that ends in `?` (`## Why not a model?`) titles a section and does not count; a decision marker in a heading (`## Needs your decision`) counts only while its section, up to the next heading, has no ask of its own, so a final section that lists the asks yields those asks and not its title. Detection is deterministic: it
-can miss an ask phrased without a question mark, and it can flag a rhetorical question.
+can miss an ask phrased without a question mark outside such a section, and it can flag a rhetorical
+question.
 
-The reply viewer lists the open asks of a reply above its text.
+In the index, a reply shows `⚠` and its first ask while any of its asks is still open, and `✓` once
+all of them are answered or dismissed. The reply viewer lists the open asks under `⚠ Waits on you`
+above the text, and the closed ones under `✓ Answered`, each with the prompt that answered it
+(`→ P13`) or `dismissed`.
 
 #### Recommended agent instruction
 
 Asks are easiest to catch when the agent gathers them in one place. Add this to your `AGENTS.md`
 (`~/.pi/agent/AGENTS.md` for Pi, `~/.gentle-shell/agent/AGENTS.md` for Gentle Shell). The package
-never adds it to the prompt by itself.
+never adds it to the prompt by itself. Every item of the final section is an ask, and its `?` ends
+the item, so any context goes before the question.
 
 ```markdown
 ## Questions for the user
 When a reply needs anything from the user (a decision, a confirmation, an output, an action), end it
-with a `## Needs your decision` section: a numbered list, one item per ask, each ending with `?`.
-Never leave an ask in the middle of the reply or phrased without `?` ("Avisame cuando…" becomes
-"¿Me avisás cuando…?"). Leave the section out when nothing is needed. Choices with fixed options
-still go through `ask_user_question` when it is available.
+with a `## Needs your decision` section: a numbered list, one item per ask. Each item is one
+question that ends with `?`: put any context before the question, never after it. Never leave an
+ask in the middle of the reply or phrased without `?` ("Let me know when it is done" becomes
+"Can you tell me when it is done?"). Leave the section out when nothing is needed. Choices with
+fixed options still go through `ask_user_question` when it is available.
 ```
 
 ## Pending asks
@@ -120,13 +128,13 @@ The **Pending** tab lists the asks still open, grouped under their prompt, newes
 
 ```
 ╭─ Pending ────────────────────────────────────────────────────────── 4 open · 0 linked ─╮
-│ ▌P2  buscá si existe algo así                                                    12:01 │
-│ ›○ P2.R1.Q1  Encontré dos opciones. ¿Cuál preferís?                                    │
-│  ○ P2.R2.Q1  ¿Borro las tres ramas viejas?  ≈ P1.R1.Q1                                 │
-│ ▌P1  limpiá las ramas viejas                                                     11:47 │
-│  ○ P1.R1.Q1  Hay tres ramas viejas. ¿Las borro?                                        │
-│  ○ P1.R1.Q2  Necesito tu OK para pushear main.                                         │
-╰─ enter answer · s sí · f R: lines · space mark · x dismiss · o open · tab replies · … ─╯
+│ ▌P2  look for something like this                                                12:01 │
+│ ›○ P2.R1.Q1  I found two options. Which one do you prefer?                             │
+│  ○ P2.R2.Q1  Should I delete the three old branches?  ≈ P1.R1.Q1                       │
+│ ▌P1  clean up the old branches                                                   11:47 │
+│  ○ P1.R1.Q1  There are three old branches. Should I delete them?                       │
+│  ○ P1.R1.Q2  Needs your decision: push to main.                                        │
+╰─ enter answer · y yes · f format · ? help · esc close ─────────────────────────────────╯
 ```
 
 | Key | What it does |
@@ -134,30 +142,33 @@ The **Pending** tab lists the asks still open, grouped under their prompt, newes
 | `↑`/`↓`, `PgUp`/`PgDn` | Move. |
 | `Space` | Marks or unmarks an ask (`●`; an unmarked ask shows `○`). |
 | `Enter` | Answers the marked asks, or the selected one: closes the overlay and pastes a `> P2.R1.Q1: <ask>` quote per ask into the editor, with room for your answer (see below). |
-| `s` | The same, with `Sí.` as the answer. |
-| `f` | Switches the answer format between `R: lines` and `same line`; the hint shows the current one. |
+| `y` | The same, with `Yes.` as the answer. |
+| `f` | Switches the answer format between `R: lines` and `same line`; the `?` card shows the current one. |
 | `x` | Dismisses the marked asks, or the selected one. |
 | `o` | Opens the reply that asks it; `Esc` comes back. |
 | `l` / `u` | Links the marked asks (2 or more) as one chain, or the selected ask to its suggested repeat / unlinks the chain. |
-| `Tab` | Switches to **Replies**. |
+| `Tab` | Goes to the next tab: Pending → Replies → Answered → Pending. |
+| `?` | Shows a card with every key of each tab; `?` or `Esc` hides it. |
 | `Esc` | Closes. |
+
+The hint line names only `enter`, `y`, `f`, `?` and `esc`; the `?` card lists the rest.
 
 The pasted text ends where you type, with no trailing newline. In the `R: lines` format (the default)
 each quote gets an `R: ` line under it and the asks are apart by an empty line:
 
 ```
-> P2.R1.Q1: Encontré dos opciones. ¿Cuál preferís?
+> P2.R1.Q1: I found two options. Which one do you prefer?
 R: 
 
-> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?
-R: Sí.
+> P1.R1.Q1: There are three old branches. Should I delete them?
+R: Yes.
 ```
 
 In the `same line` format the answer follows the quote after `→ `, one ask per line:
 
 ```
-> P2.R1.Q1: Encontré dos opciones. ¿Cuál preferís? → 
-> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro? → Sí.
+> P2.R1.Q1: I found two options. Which one do you prefer? → 
+> P1.R1.Q1: There are three old branches. Should I delete them? → Yes.
 ```
 
 The format is stored as a `reply-thread.format` custom entry on the branch; the latest one wins.
@@ -182,14 +193,36 @@ expands it.
 Dismiss and link are stored as `reply-thread.ask` custom entries on the session branch (outside the
 model context), so they follow `/resume` and branches like everything else.
 
+### Answered asks
+
+The **Answered** tab lists the closed asks, grouped under the prompt of their reply, newest prompt
+first. Under each ask, `↳` names the prompt that answered it and the answer it gave, or `✕ dismissed`
+says you dismissed it. A closed chain shows once, on its newest ask, with `↺ <older IDs>`. `↑`/`↓`
+move and `Enter` or `o` opens the reply.
+
+```
+╭─ Answered ──────────────────────────────────────────────────── 1 answered · 1 dismissed ─╮
+│ ▌P1  clean up the old branches                                                     12:00 │
+│ ›✓ P1.R1.Q1  There are three old branches. Should I delete them?                         │
+│    ↳ P3  Yes, all three.                                                                 │
+│  ✓ P1.R1.Q2  Needs your decision: push to main.                                          │
+│    ✕ dismissed                                                                           │
+╰─ ↑↓ move · enter open · esc close ───────────────────────────────────────────────────────╯
+```
+
+The answer is read from the prompt that cites the ask: the `R:` line under the quote, the text after
+`→` on the quote line, or the first line after the quote that is not a quote. A prompt that cites the
+ID without a quote, or has nothing after it, answers with its first line.
+
 ### Widget
 
-A widget above the editor summarizes the latest prompt while it has two or more replies, and counts
-the open asks (a chain counts once) whenever there are any:
+A widget above the editor summarizes the latest prompt while it has two or more replies, with `⚠`
+on each reply that still has an open ask, and counts the open asks (a chain counts once) whenever
+there are any:
 
 ```
 P12 · 3 replies: R1 prompt ⚠ · R2 job: tests · R3 worker: docs · alt+r
-⚠ 4 pending · newest: P12.R1.Q1 Encontré dos opciones. ¿Cuál preferís? · alt+r
+⚠ 4 pending · newest: P12.R1.Q1 I found two options. Which one do you prefer? · alt+r
 ```
 
 The summary clears when the next prompt starts; the pending line stays until every ask is answered
@@ -198,7 +231,7 @@ or dismissed. `Alt+R` opens the overlay.
 ## Themes
 
 Every colour comes from the active Pi theme (frame `borderAccent`, prompts `userMessageBg`, selection
-`selectedBg`, jobs `success`, workers `customMessageLabel`, asks `warning`, marks `accent`, chains
+`selectedBg`, jobs and closed asks `success`, workers `customMessageLabel`, asks `warning`, marks `accent`, chains
 `muted`, suggested repeats `mdLink`, scrollbar `scrollbarThumb`/`scrollbarTrack`), so the overlay
 follows your theme, including Gentle Shell's.
 

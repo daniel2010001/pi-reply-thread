@@ -132,7 +132,7 @@ function scrollCells(theme: Theme, total: number, height: number, top: number): 
 
 /**
  * The thread list with a full-reply viewer: Enter opens a reply, Esc goes back, Esc on the list closes.
- * With a central, a Pending tab lists the open asks; Enter or `s` closes it with the text to paste,
+ * With a central, a Pending tab lists the open asks; Enter or `y` closes it with the text to paste,
  * in the format `f` toggles. An Answered tab lists the closed asks and how they closed.
  */
 export class RepliesView implements Component {
@@ -422,10 +422,10 @@ export class RepliesView implements Component {
 		else if (kb.matches(data, "tui.select.confirm") && row?.kind === "older") {
 			this.expanded = true;
 			this.setPending(this.pending);
-		} else if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "s")) {
+		} else if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "y")) {
 			const targets = this.targets();
 			if (!targets.length) return false;
-			this.done(answerText(targets, matchesKey(data, "s"), this.format));
+			this.done(answerText(targets, matchesKey(data, "y"), this.format));
 			return false;
 		} else if (matchesKey(data, "f")) {
 			this.format = this.format === "lines" ? "inline" : "lines";
@@ -649,7 +649,7 @@ export class RepliesView implements Component {
 	private pendingHints(): Hint[] {
 		return [
 			["enter", "answer"],
-			["s", "sí"],
+			["y", "yes"],
 			["f", "format"],
 			["?", "help"],
 			["esc", "close"],
@@ -782,7 +782,7 @@ export class RepliesView implements Component {
 		return [
 			"Pending",
 			["enter", "answer the marked or selected asks; expand Older (N)"],
-			["s", "answer Sí."],
+			["y", "answer Yes."],
 			["f", `switch the answer format; now ${FORMAT_NAMES[this.format]}`],
 			["space", "mark or unmark an ask"],
 			["x", "dismiss the marked or selected asks"],

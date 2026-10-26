@@ -109,7 +109,7 @@ describe("Pending tab", () => {
 		const rows = view.text(120);
 		expect(rows[0]).toMatch(/^╭─ Pending ─+ 3 open · 0 linked ─╮$/);
 		expect(rows.at(-1)).toMatch(
-			/^╰─ enter answer · s sí · f format · \? help · esc close ─+╯$/,
+			/^╰─ enter answer · y yes · f format · \? help · esc close ─+╯$/,
 		);
 		view.key("\t");
 		expect(view.text()[0]).toMatch(/^╭─ Replies ─+ 3 prompts · 3 replies ─╮$/);
@@ -181,12 +181,22 @@ describe("answering from the central", () => {
 		});
 	});
 
-	it("s pastes the same quotes with R: Sí. under each one", () => {
+	it("y pastes the same quotes with R: Yes. under each one", () => {
 		const view = central(branch);
-		view.keys(" ", "tui.select.down", " ", "s");
+		view.keys(" ", "tui.select.down", " ", "y");
 		expect(view.closed()).toEqual({
-			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: Sí.\n\n> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nR: Sí.",
+			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: Yes.\n\n> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nR: Yes.",
 		});
+	});
+
+	it("s no longer answers, marks or acts on anything", () => {
+		const view = central(branch);
+		const before = view.text(100);
+		view.key("s");
+		expect(view.closed()).toBeUndefined();
+		expect(view.actions).toEqual([]);
+		expect(view.formats).toEqual([]);
+		expect(view.text(100)).toEqual(before);
 	});
 
 	it("f toggles the answer format, saves each choice, and the help names the current one", () => {
@@ -212,25 +222,25 @@ describe("answering from the central", () => {
 		});
 	});
 
-	it("answers in the format it opens with, and s adds → Sí. on the same line", () => {
+	it("answers in the format it opens with, and y adds → Yes. on the same line", () => {
 		const view = central(branch, { format: "inline" });
 		view.key("?");
 		expect(view.text(120)).toContainEqual(expect.stringContaining("now same line"));
 		view.key("?");
-		view.keys(" ", "tui.select.down", " ", "s");
+		view.keys(" ", "tui.select.down", " ", "y");
 		expect(view.closed()).toEqual({
-			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas? → Sí.\n> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro? → Sí.",
+			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas? → Yes.\n> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro? → Yes.",
 		});
 		expect(view.formats).toEqual([]);
 	});
 
 	it("shows the short hints whole from 60 columns, whatever the selected ask allows, and cuts them below", () => {
 		const view = central(branch);
-		expect(view.text(60).at(-1)).toBe("╰─ enter answer · s sí · f format · ? help · esc close ────╯");
-		expect(view.text(80).at(-1)).toBe(`╰─ enter answer · s sí · f format · ? help · esc close ${"─".repeat(24)}╯`);
+		expect(view.text(60).at(-1)).toBe("╰─ enter answer · y yes · f format · ? help · esc close ───╯");
+		expect(view.text(80).at(-1)).toBe(`╰─ enter answer · y yes · f format · ? help · esc close ${"─".repeat(23)}╯`);
 		view.keys(" ", "tui.select.down", " ");
-		expect(view.text(80).at(-1)).toBe(`╰─ enter answer · s sí · f format · ? help · esc close ${"─".repeat(24)}╯`);
-		expect(view.text(40).at(-1)).toBe("╰─ enter answer · s sí · f format · … ─╯");
+		expect(view.text(80).at(-1)).toBe(`╰─ enter answer · y yes · f format · ? help · esc close ${"─".repeat(23)}╯`);
+		expect(view.text(40).at(-1)).toBe("╰─ enter answer · y yes · f format ·… ─╯");
 	});
 
 	it("o opens the reply of the ask and Esc goes back to Pending", () => {
@@ -606,7 +616,7 @@ describe("Answered tab", () => {
 });
 
 describe("key help", () => {
-	const KEYS_LISTED = ["↑↓", "pgup/pgdn", "enter", "s", "f", "space", "x", "l", "u", "o", "tab", "?", "esc", "home/end", "q"];
+	const KEYS_LISTED = ["↑↓", "pgup/pgdn", "enter", "y", "f", "space", "x", "l", "u", "o", "tab", "?", "esc", "home/end", "q"];
 
 	it("? opens a card that lists every key, one per line, and ? or Esc closes it", () => {
 		const view = central(branch, { rows: 60 });
@@ -617,6 +627,8 @@ describe("key help", () => {
 		expect(rows.every((line) => visibleWidth(line) === 100)).toBe(true);
 		const keys = rows.slice(1, -1).flatMap((line) => /^│ {3}(\S+(?:, \S+)?) {2,}\S/.exec(line)?.[1].split(", ") ?? []);
 		for (const key of KEYS_LISTED) expect(keys).toContain(key);
+		expect(keys).not.toContain("s");
+		expect(rows).toContainEqual(expect.stringMatching(/^│ {3}y +answer Yes\. +│$/));
 		for (const section of ["Pending", "Replies", "Answered", "Every tab", "Reply viewer"]) {
 			expect(rows).toContainEqual(expect.stringMatching(new RegExp(`^│ ${section} +│$`)));
 		}
