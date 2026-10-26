@@ -42,10 +42,10 @@ reply an ordered and a unique ID, and keeps the open asks of earlier replies vis
 | T15 | S3 | [x] A heading ending in `?` is a section title, not an ask | inline, test-first | `78ba643` |
 | T17 | S8 | [x] Demo session (`pnpm demo`) to try `l` on repeated asks | inline | `dab4944` |
 | T16 | S8 | [x] Larger marks in Pending: `○` open, `●` marked | inline, test-first | `7767cb3` |
-| T18 | S8 | [ ] Answer format menu: `R:` lines (default) or same line, `f` toggles in Pending | gentle-ai-worker, test-first | — |
-| T19 | S8 | [ ] Manual link: `l` with 2+ marked asks links them as one chain | gentle-ai-worker, test-first | — |
-| T20 | S3 | [ ] A marker heading with asks under it is a section title, not an ask | gentle-ai-worker, test-first | — |
-| T21 | S3 | [ ] `## Needs your decision` convention: README snippet (after the worker) + owner's AGENTS.md (done) | inline | — |
+| T18 | S8 | [x] Answer format menu: `R:` lines (default) or same line, `f` toggles in Pending | gentle-ai-worker, test-first | `105d430` (mislabelled, see L32) |
+| T19 | S8 | [x] Manual link: `l` with 2+ marked asks links them as one chain | gentle-ai-worker, test-first | `9c4b552` |
+| T20 | S3 | [x] A marker heading with asks under it is a section title, not an ask | gentle-ai-worker, test-first | `d097cb0` |
+| T21 | S3 | [x] `## Needs your decision` convention: README snippet + owner's AGENTS.md | inline | `T21` |
 | T14 | S8 | [ ] v0.2, not started: optional on-demand `/replies triage` (L21) | — | — |
 | T7 | S1-S6 | [x] README (English), command help, CHANGELOG | inline | `e9d0b1f` |
 
@@ -98,3 +98,5 @@ Acabo de probar lo del tab y pasar del pendding a las replies, me encanta. algo 
   - T19 manual link: with 2 or more asks marked, `l` links them as one chain, newest continues the next older, and so on (`link` entries in L19 shape), then clears the marks; with fewer than 2 marked, `l` keeps linking the selected ask to its `≈` suggestion. The `l link` hint shows when either applies.
   - T20: a heading that contains a decision marker (e.g. `## Needs your decision`) is not an ask when its section (until the next heading of any level) has at least one ask; with no ask under it, it still counts (keeps the L23 pinned case `## Needs your decision\n\n- A or B`).
 - L31 (2026-10-25, T21): gsh sets `PI_CODING_AGENT_DIR` to `~/.gentle-shell/agent`, so it reads `~/.gentle-shell/agent/AGENTS.md` (did not exist); `~/.pi/agent/AGENTS.md` is plain Pi only. Owner chose "Crear ~/.gentle-shell/agent/AGENTS.md": created with the 6-line `## Questions for the user` instruction (end with `## Needs your decision`, numbered asks ending in `?`, `ask_user_question` still for fixed choices). README snippet pending until worker mvojbe7g-1-b788 finishes (README is in its surfaces).
+- L32 (2026-10-25, T18-T20 evidence): worker mvojbe7g-1-b788 (status partial: its rules forbid `git commit`). RED/GREEN: T18 16 failed → 141/141; T19 3 failed → 145/145; T20 2 failed → 147/147; typecheck clean. Parent mistake: the `git commit -qam` of L31 ran while the worker edited, so `105d430` ("docs(odd): record the AGENTS.md convention") also holds all of T18 (format.ts, replies-view.ts, reply-thread.ts, tests, README, CHANGELOG). Not rewritten (owner's call; the branch is local). Parent committed T19 from the worker's patch (`9c4b552`, 145/145 alone) and T20 (`d097cb0`, 147/147). Parent review: `markedChain` links newest→older only; the T20 section splice removes the marker heading once an ask follows it. T20 differential over 913 real replies: 8 asks lost, all Spanish marker headings above real asks (`Necesito tu decisión` above `¿Vamos con los dos?`), 0 gained. Hint line now ends cut at 100 columns (`… · tab replies · e…`). Lesson: never `commit -a` while a writer works in the tree; stage paths explicitly.
+- L33 (2026-10-25, T21): README section "Recommended agent instruction" with the AGENTS.md snippet (both agent dirs), CHANGELOG line.

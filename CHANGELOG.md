@@ -23,3 +23,4 @@
   closes only when a later prompt cites its ID or it is dismissed; linked asks close together.
   Prompts beyond the 10 newest fold into `Older (N)`. `/replies pending` lists the open asks as
   plain text, and `/replies <question ID>` opens the reply that asks it.
+- README: a recommended `AGENTS.md` instruction that gathers the agent's asks in a final `## Needs your decision` section.

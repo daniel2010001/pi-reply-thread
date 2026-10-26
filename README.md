@@ -94,6 +94,21 @@ can miss an ask phrased without a question mark, and it can flag a rhetorical qu
 
 The reply viewer lists the open asks of a reply above its text.
 
+#### Recommended agent instruction
+
+Asks are easiest to catch when the agent gathers them in one place. Add this to your `AGENTS.md`
+(`~/.pi/agent/AGENTS.md` for Pi, `~/.gentle-shell/agent/AGENTS.md` for Gentle Shell). The package
+never adds it to the prompt by itself.
+
+```markdown
+## Questions for the user
+When a reply needs anything from the user (a decision, a confirmation, an output, an action), end it
+with a `## Needs your decision` section: a numbered list, one item per ask, each ending with `?`.
+Never leave an ask in the middle of the reply or phrased without `?` ("Avisame cuando…" becomes
+"¿Me avisás cuando…?"). Leave the section out when nothing is needed. Choices with fixed options
+still go through `ask_user_question` when it is available.
+```
+
 ## Pending asks
 
 Every ask gets two IDs, like a reply:
