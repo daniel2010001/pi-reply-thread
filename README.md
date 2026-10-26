@@ -262,11 +262,17 @@ mark (`●`) and dismiss like any ask. `←` collapses it again.
 │    ≈ P1.R1.Q1  There are three old branches. Should I delete them?                     │
 ```
 
-A group never closes by itself: answering or dismissing one of its asks closes only that one, and
-the next newest takes the row. Press `l` on the row (or one of its expanded asks) to link the group:
-every other ask continues the oldest one, and the row becomes a chain. To link asks that do not look
-alike, mark 2 or more with `Space` and press `l`: each one continues the next older one, and the marks
-clear.
+**A group row answers only its newest ask.** A group is a display fold, never a link: it only tells
+you the asks look alike, and closing an ask stays explicit. So answering or dismissing the row closes
+its newest ask, and the next newest takes the row. To close the whole group at once, use one of two
+ways:
+
+- **`l`, then answer**: press `l` on the row (or one of its expanded asks) to link the group: every
+  other ask continues the oldest one and the row becomes a chain, which closes as a whole.
+- **`→`, then answer each**: expand the row and answer or dismiss its asks one by one.
+
+The `?` card says the same under the group keys. To link asks that do not look alike, mark 2 or more
+with `Space` and press `l`: each one continues the next older one, and the marks clear.
 
 Linked asks form a chain, shown once on its newest ask with `↺ <older IDs>`; answering or dismissing
 any of them closes the whole chain. `u` unlinks the newest ask from the chain.

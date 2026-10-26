@@ -49,3 +49,5 @@
   reply; the Answered tab reads the answer from that quote. A quote without text, or with a text no
   ask has, and an ID outside a quote close by ID as before.
 - The widget's pending count matches the Pending title: a group of repeats counts once.
+- A group row answers only its newest ask (a group is a display fold, never a link); press `l` first
+  to close the whole group together, or `→` and answer each. The `?` card and README say so.

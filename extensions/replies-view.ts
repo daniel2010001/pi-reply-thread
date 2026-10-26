@@ -858,8 +858,11 @@ export class RepliesView implements Component {
 
 	// ── Key help ─────────────────────────────────────────────────────────────
 
-	/** Every key of the central, under the place it works in; a string is a section title. Ends with the ask mode. */
-	private helpEntries(): (string | [key: string, action: string] | { note: string })[] {
+	/**
+	 * Every key of the central, under the place it works in; a string is a section title, a note a muted
+	 * line, indented under the keys it explains. Ends with the ask mode.
+	 */
+	private helpEntries(): (string | [key: string, action: string] | { note: string; indent?: boolean })[] {
 		const mode = this.central?.mode === "all" ? "every question" : "decision section only";
 		return [
 			"Pending",
@@ -870,6 +873,7 @@ export class RepliesView implements Component {
 			["x", "dismiss the marked or selected asks"],
 			["→, ←", "expand or collapse the similar asks (≈) of a row"],
 			["l", "link the marked asks, or a row's similar asks to the oldest one"],
+			{ note: "A group row answers only its newest ask; press l first to close the whole group together.", indent: true },
 			["u", "unlink the ask from its chain"],
 			["o", "open the reply that asks it"],
 			"Replies",
@@ -912,7 +916,7 @@ export class RepliesView implements Component {
 				? theme.fg("accent", theme.bold(entry))
 				: Array.isArray(entry)
 					? `  ${theme.fg("accent", entry[0])}${" ".repeat(keyWidth - visibleWidth(entry[0]))}  ${theme.fg("text", entry[1])}`
-					: theme.fg("muted", entry.note),
+					: `${entry.indent ? "  " : ""}${theme.fg("muted", entry.note)}`,
 		);
 		const height = Math.min(this.listHeight(), rows.length);
 		this.helpTop = Math.min(this.helpTop, rows.length - height);

@@ -817,6 +817,34 @@ describe("key help", () => {
 		expect(view.closed()).toBeUndefined();
 	});
 
+	it("says under the group keys that a group row answers only its newest ask, and fits the cap on 8, 24 and 50 rows", () => {
+		const GROUP = /^│ {3}A group row answers only its newest ask; press l first to close the whole group together\. +│$/;
+		const wide = central(branch, { rows: 60 });
+		wide.key("?");
+		const rows = wide.text(120);
+		const at = rows.findIndex((line) => GROUP.test(line));
+		expect(rows[at - 1]).toMatch(/^│ {3}l +link the marked asks, or a row's similar asks to the oldest one +│$/);
+		expect(wide.lines(120)[at]).toContain(`${fg("muted")}A group row`);
+		for (const height of [8, 24, 50]) {
+			const cap = Math.min(height - 4, Math.floor(height * 0.9));
+			for (const width of [24, 80, 140]) {
+				const view = central(branch, { rows: height });
+				view.key("?");
+				const seen: string[] = [];
+				for (let press = 0; press < 40; press += 1) {
+					const lines = view.text(width);
+					expect(lines.length).toBeLessThanOrEqual(cap);
+					expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
+					expect(lines.at(-1)).toMatch(/^╰─/);
+					seen.push(...lines);
+					view.key("tui.select.down");
+				}
+				expect(seen.some((line) => line.startsWith("│   A group row"))).toBe(true);
+				if (width === 140) expect(seen).toContainEqual(expect.stringMatching(GROUP));
+			}
+		}
+	});
+
 	it("does nothing else while open, and returns to the tab it opened from", () => {
 		const view = central(branch);
 		view.keys("?", "x", "f", "tui.select.confirm", "\t", "?");
