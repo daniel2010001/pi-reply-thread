@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { detectOpenAsks } from "../src/asks.ts";
+import { detectOpenAsks, untrackedAsks } from "../src/asks.ts";
+import { questionIds } from "../src/pending.ts";
+import { buildThreads } from "../src/threads.ts";
+import { assistant, user } from "./helpers.ts";
 
 describe("detectOpenAsks", () => {
 	it("takes a line ending in a question mark as an ask", () => {
@@ -181,8 +184,14 @@ describe("detectOpenAsks", () => {
 			detectOpenAsks(["## Needs your decision", "Pick one.", "", "### Details", "", "¿Seguimos?"].join("\n")),
 		).toEqual(["Needs your decision", "¿Seguimos?"]);
 		expect(
-			detectOpenAsks(["# Necesito tu OK", "Para pushear.", "## ¿Por qué?", "Porque sí.", "## Needs your decision", "- Ship it?"].join("\n")),
+			detectOpenAsks(
+				["# Necesito tu OK", "Para pushear.", "## ¿Por qué?", "Porque sí.", "## Needs your decision", "- Ship it?"].join("\n"),
+				"all",
+			),
 		).toEqual(["Necesito tu OK", "Ship it?"]);
+		expect(
+			detectOpenAsks(["# Necesito tu OK", "Para pushear.", "## Needs your decision", "- Ship it?"].join("\n")),
+		).toEqual(["Ship it?"]);
 	});
 
 	it("takes every bullet or numbered item of a marker section as an ask, even without ?, and not the heading", () => {
@@ -202,7 +211,7 @@ describe("detectOpenAsks", () => {
 					"Plain text under the heading.",
 				].join("\n"),
 			),
-		).toEqual(["Merge `feat/x` into main", "Keep the old name", "Push the tag", "A or B", "Ship it?", "Nested: drop the draft"]);
+		).toEqual(["Merge `feat/x` into main", "Keep the old name", "Push the tag", "A or B", "Ship it?"]);
 		expect(detectOpenAsks("### **Necesito tu decisión**\n\n- Borrar las ramas\n- Borrar las ramas")).toEqual(["Borrar las ramas"]);
 	});
 
@@ -212,5 +221,94 @@ describe("detectOpenAsks", () => {
 				["## Summary", "- Tests pass", "## Needs your decision", "- Merge now", "```", "- not an item", "```", "### Details", "- A detail", "## Next", "1. Release"].join("\n"),
 			),
 		).toEqual(["Merge now"]);
+	});
+});
+
+describe("detectOpenAsks modes", () => {
+	const reply = [
+		"Tests are green. Should I also bump the version?",
+		"",
+		"## Why not a model?",
+		"",
+		"Does it need one? No, the rule is enough.",
+		"",
+		"## Needs your decision",
+		"",
+		"1. Merge `feat/x` into main? It is green.",
+		"2. Keep the old name",
+		"Which tag do you want?",
+		"Plain context under the items.",
+		"",
+		"## Next",
+		"",
+		"Want the release notes too?",
+	].join("\n");
+
+	it("section mode, the default, keeps only the decision section's top-level items and ? lines", () => {
+		const section = ["Merge `feat/x` into main? It is green.", "Keep the old name", "Which tag do you want?"];
+		expect(detectOpenAsks(reply)).toEqual(section);
+		expect(detectOpenAsks(reply, "section")).toEqual(section);
+	});
+
+	it("numbers the asks of the decision section like its items, so Q# is the item number", () => {
+		const items = ["1. Merge now? It is green.", "2. Keep the old name", "3. Tag it, or not?"];
+		const text = ["Context first: should I rebase?", "", "## Needs your decision", "", ...items].join("\n");
+		const [thread] = buildThreads([user("go"), assistant(text, { id: "a1b2c3d4" })]);
+		expect(questionIds(thread.replies[0]).map((ask) => [ask.ordinal, ask.text])).toEqual([
+			["P1.R1.Q1", "Merge now? It is green."],
+			["P1.R1.Q2", "Keep the old name"],
+			["P1.R1.Q3", "Tag it, or not?"],
+		]);
+	});
+
+	it("does not take a nested item as an ask by the item rule: 4+ spaces or a second list level", () => {
+		const text = [
+			"## Needs your decision",
+			"   - Three spaces is still the top level",
+			"- Merge now",
+			"  - with a squash",
+			"  - Squash it?",
+			"    - Four spaces is nested",
+			"\t- A tab is nested",
+			"1. Release",
+			"   - Under a numbered item",
+		].join("\n");
+		expect(detectOpenAsks(text)).toEqual(["Three spaces is still the top level", "Merge now", "Release"]);
+		expect(detectOpenAsks(text, "all")).toEqual(["Three spaces is still the top level", "Merge now", "Squash it?", "Release"]);
+	});
+
+	it("keeps today's rules for a reply without a decision section, in both modes", () => {
+		const text = ["Ship it?", "- Merge now?", "  - Nested too?", "- A plain item", "## Summary", "Done. Anything else?"].join("\n");
+		expect(detectOpenAsks(text)).toEqual(["Ship it?", "Merge now?", "Nested too?", "Done. Anything else?"]);
+		expect(detectOpenAsks(text, "all")).toEqual(detectOpenAsks(text));
+		expect(untrackedAsks(text)).toBe(0);
+	});
+
+	it("keeps today's rules for a marker section with no ask: the heading counts, with the questions elsewhere", () => {
+		const text = ["Merge?", "", "## Needs your decision", "", "Pick when you can."].join("\n");
+		expect(detectOpenAsks(text)).toEqual(["Merge?", "Needs your decision"]);
+		expect(detectOpenAsks(text, "all")).toEqual(["Merge?", "Needs your decision"]);
+		expect(untrackedAsks(text)).toBe(0);
+	});
+
+	it("all mode keeps the questions outside the section and the section's top-level items", () => {
+		expect(detectOpenAsks(reply, "all")).toEqual([
+			"Tests are green. Should I also bump the version?",
+			"Merge `feat/x` into main? It is green.",
+			"Keep the old name",
+			"Which tag do you want?",
+			"Want the release notes too?",
+		]);
+	});
+
+	it("counts the asks section mode leaves outside the decision section, once each, and none in all mode", () => {
+		expect(untrackedAsks(reply)).toBe(2);
+		expect(untrackedAsks(reply, "section")).toBe(2);
+		expect(untrackedAsks(reply, "all")).toBe(0);
+		const repeated = ["Ship it?", "Ship it?", "## Needs your decision", "- Ship it?", "- Tag it"].join("\n");
+		expect(detectOpenAsks(repeated)).toEqual(["Ship it?", "Tag it"]);
+		expect(untrackedAsks(repeated)).toBe(0);
+		const one = ["Ship it?", "## Needs your decision", "- Tag it"].join("\n");
+		expect(untrackedAsks(one)).toBe(1);
 	});
 });

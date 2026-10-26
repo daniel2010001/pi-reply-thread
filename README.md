@@ -24,6 +24,9 @@ place, where you answer them by pasting a quote.
 - Nothing enters the model context.
 - Works after `/resume` and on any branch, because the index is rebuilt from the branch every time.
 
+Which questions count as asks? See [How asks are found](#how-asks-are-found): when a reply has a
+`## Needs your decision` section, only that section counts by default.
+
 ## Install
 
 ```sh
@@ -50,6 +53,7 @@ gsh -- -e ./extensions/reply-thread.ts   # Gentle Shell
 In the index, `↑`/`↓` move, `Enter` opens a reply, `Esc` closes. In the reply viewer, `↑`/`↓`
 scroll, `PgUp`/`PgDn` or `Space` page, `Home`/`End` jump, and `Esc` or `q` goes back. A reply
 opened by ID closes on `Esc`. In any tab, `?` shows a card with every key; `?` or `Esc` hides it.
+Its last line names the ask mode in use (`Asks: decision section only` or `Asks: every question`).
 
 Outside the interactive TUI (print or RPC mode), `/replies` and `Alt+R` send the index or the reply as plain
 text, and `/replies pending` sends the open asks, one per line (`P12.R1.Q1  a1b2c3d4.1  Which one do you prefer?`),
@@ -79,28 +83,76 @@ Each reply shows what arrived since the previous one:
 Gentle Agents wakes the session with a system-generated user message after a job or subagent ends.
 That message is not counted as a prompt, so those replies stay under the prompt that started them.
 
-### Replies that wait on you
+## How asks are found
 
-A line of a reply is an ask when it asks you something:
+An **ask** is a line of a reply that waits on you. Which lines count depends on one thing: does the
+reply have a **decision section**? That is a heading with a decision marker, such as
+`## Needs your decision`, with at least one ask under it (up to the next heading).
 
-- the line ends with `?` (for example `Which one do you prefer?` or `¿Cuál preferís?`), or
-- it contains a decision marker: `needs your decision`, `decision needed`, `waiting on you`,
-  `waiting for you`, and the Spanish `necesito que decidas`, `necesito tu OK`, `necesito tu decisión`,
-  `necesito tu confirmación`. A marker inside double quotes (`"…"`, `“…”`, `«…»`) is only being
-  mentioned and does not count, or
-- it is a list item (bullet or numbered) in a section headed by a decision marker
-  (`## Needs your decision`), up to the next heading, even without `?`.
+| The reply | Default (`section`) | With `--reply-thread-asks all` |
+|---|---|---|
+| has a decision section | **Only that section**: each top-level list item, even without `?`, and each other line in it that ends with `?`. Questions elsewhere in the reply are not tracked. | Every question in the reply, plus the section's top-level items. |
+| has no decision section | Every line that ends with `?` or holds a decision marker. | The same. |
 
-Code blocks, inline code, blockquotes and table rows are ignored. A heading that ends in `?` (`## Why not a model?`) titles a section and does not count; a decision marker in a heading (`## Needs your decision`) counts only while its section, up to the next heading, has no ask of its own, so a final section that lists the asks yields those asks and not its title. Detection is deterministic: it
-can miss an ask phrased without a question mark outside such a section, and it can flag a rhetorical
-question.
+For example, this reply:
+
+```markdown
+Tests are green. Should I also bump the version?
+
+## Needs your decision
+
+1. Merge `feat/x` into main?
+2. Keep the old name
+   - with a squash
+```
+
+- By default it has 2 asks, numbered like the items: `Q1` Merge `feat/x` into main?, `Q2` Keep the
+  old name. The nested `with a squash` is part of item 2, not an ask.
+- With `all` it has 3: the first line, `Tests are green. Should I also bump the version?`, becomes `Q1`,
+  and the items become `Q2` and `Q3`.
+
+### Why doesn't a question in the middle of a reply show up?
+
+Because that reply has a decision section, and by default only the decision section counts: it is
+where the agent says what it needs from you, and it keeps `Q1`, `Q2`… equal to the item numbers.
+The reply viewer says when this happens, under the asks: `1 more question outside the decision
+section is not tracked (--reply-thread-asks all tracks them).`
+
+To track every question, start the session with the flag:
+
+```sh
+pi --reply-thread-asks all
+gsh -- --reply-thread-asks all   # Gentle Shell
+```
+
+The values are `section` (the default) and `all`; any other value works as `section` and shows a
+warning when the session starts.
+
+### Detection details
+
+- **Questions**: a line that ends with `?` (for example `Which one do you prefer?` or `¿Cuál preferís?`).
+- **Decision markers**: `needs your decision`, `decision needed`, `waiting on you`, `waiting for you`,
+  and the Spanish `necesito que decidas`, `necesito tu OK`, `necesito tu decisión`,
+  `necesito tu confirmación`. A line with a marker is an ask; a marker inside double quotes (`"…"`,
+  `“…”`, `«…»`) is only being mentioned and does not count.
+- **Items**: a top-level list item (bullet or numbered, indented at most 3 spaces) in a section headed
+  by a marker is an ask even without `?`. A nested item (indented 4 or more spaces, or under another
+  item) is an ask only when it ends with `?`, and never in the default mode when the reply has a
+  decision section.
+- **Headings**: a heading that ends in `?` (`## Why not a model?`) titles a section and does not count.
+  A marker heading counts only while its section has no ask of its own, so a decision section yields
+  its asks and not its title.
+- Code blocks, inline code, blockquotes and table rows are ignored.
+
+Detection is deterministic: it can miss an ask phrased without a question mark outside a decision
+section, and it can flag a rhetorical question.
 
 In the index, a reply shows `⚠` and its first ask while any of its asks is still open, and `✓` once
 all of them are answered or dismissed. The reply viewer lists the open asks under `⚠ Waits on you`
 above the text, and the closed ones under `✓ Answered`, each with the prompt that answered it
 (`→ P13`) or `dismissed`.
 
-#### Recommended agent instruction
+### Recommended agent instruction
 
 Asks are easiest to catch when the agent gathers them in one place. Add this to your `AGENTS.md`
 (`~/.pi/agent/AGENTS.md` for Pi, `~/.gentle-shell/agent/AGENTS.md` for Gentle Shell). The package

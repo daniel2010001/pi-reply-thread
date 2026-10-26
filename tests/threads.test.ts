@@ -215,3 +215,13 @@ describe("buildThreads", () => {
 		expect(thread.replies[0].timestamp).toBe(entries[1].timestamp);
 	});
 });
+
+describe("buildThreads ask modes", () => {
+	it("finds the asks in section mode by default and every question in all mode", () => {
+		const text = "Should I rebase first?\n\n## Needs your decision\n\n1. Merge now";
+		const entries = [user("go"), assistant(text)];
+		expect(buildThreads(entries)[0].replies[0].openAsks).toEqual(["Merge now"]);
+		expect(buildThreads(entries, "section")[0].replies[0].openAsks).toEqual(["Merge now"]);
+		expect(buildThreads(entries, "all")[0].replies[0].openAsks).toEqual(["Should I rebase first?", "Merge now"]);
+	});
+});

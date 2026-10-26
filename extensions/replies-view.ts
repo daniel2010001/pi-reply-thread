@@ -11,6 +11,7 @@ import {
 	promptLine,
 	triggerText,
 } from "../src/format.ts";
+import { type AskMode, untrackedAsks } from "../src/asks.ts";
 import { type Ask, type AskAction, type AskState, type ClosedAsk, type PendingAsk, questionIds } from "../src/pending.ts";
 import type { Reply, Thread, Trigger, TriggerKind } from "../src/threads.ts";
 
@@ -55,6 +56,8 @@ export interface Central {
 	format: AnswerFormat;
 	/** Saves the format `f` switches to on the branch. */
 	setFormat(format: AnswerFormat): void;
+	/** Which lines of a reply are asks, from `--reply-thread-asks`. */
+	mode: AskMode;
 }
 
 /** One line of the Pending tab: a prompt header, an open ask, or the folded older prompts. */
@@ -149,6 +152,8 @@ export class RepliesView implements Component {
 	private reply: Reply | undefined;
 	private thread: Thread | undefined;
 	private body: Markdown | undefined;
+	/** Questions of the open reply that `section` mode leaves outside the decision section. */
+	private untracked = 0;
 	private scroll = 0;
 	/** Opened straight on a reply by `/replies <id>`: Esc in the viewer closes instead of going back. */
 	private readonly closeFromViewer: boolean;
@@ -226,6 +231,7 @@ export class RepliesView implements Component {
 		this.reply = reply;
 		this.thread = thread ?? this.rows.find((row) => row.reply === reply)?.thread;
 		this.body = new Markdown(reply.text, 0, 0, getMarkdownTheme());
+		this.untracked = this.central?.mode === "section" ? untrackedAsks(reply.text) : 0;
 		this.scroll = 0;
 	}
 
@@ -777,8 +783,9 @@ export class RepliesView implements Component {
 
 	// ── Key help ─────────────────────────────────────────────────────────────
 
-	/** Every key of the central, under the place it works in; a string is a section title. */
-	private helpEntries(): (string | [key: string, action: string])[] {
+	/** Every key of the central, under the place it works in; a string is a section title. Ends with the ask mode. */
+	private helpEntries(): (string | [key: string, action: string] | { note: string })[] {
+		const mode = this.central?.mode === "all" ? "every question" : "decision section only";
 		return [
 			"Pending",
 			["enter", "answer the marked or selected asks; expand Older (N)"],
@@ -803,6 +810,7 @@ export class RepliesView implements Component {
 			["pgup/pgdn, space", "page"],
 			["home/end", "jump to the top or the end"],
 			["esc, q", "back"],
+			{ note: `Asks: ${mode}` },
 		];
 	}
 
@@ -822,11 +830,13 @@ export class RepliesView implements Component {
 	private renderHelp(width: number): string[] {
 		const theme = this.theme;
 		const entries = this.helpEntries();
-		const keyWidth = Math.max(...entries.map((entry) => (typeof entry === "string" ? 0 : visibleWidth(entry[0]))));
+		const keyWidth = Math.max(...entries.map((entry) => (Array.isArray(entry) ? visibleWidth(entry[0]) : 0)));
 		const rows = entries.map((entry) =>
 			typeof entry === "string"
 				? theme.fg("accent", theme.bold(entry))
-				: `  ${theme.fg("accent", entry[0])}${" ".repeat(keyWidth - visibleWidth(entry[0]))}  ${theme.fg("text", entry[1])}`,
+				: Array.isArray(entry)
+					? `  ${theme.fg("accent", entry[0])}${" ".repeat(keyWidth - visibleWidth(entry[0]))}  ${theme.fg("text", entry[1])}`
+					: theme.fg("muted", entry.note),
 		);
 		const height = Math.min(this.listHeight(), rows.length);
 		this.helpTop = Math.min(this.helpTop, rows.length - height);
@@ -845,15 +855,16 @@ export class RepliesView implements Component {
 
 	/**
 	 * What fits above the reply while it keeps MIN_BODY rows: the thread's prompt, then the open asks,
-	 * then the closed ones, each cut to the first ones and a "more" line, or to a title with their count,
-	 * when the screen is short.
+	 * then the note on untracked questions, then the closed asks, each list cut to the first ones and
+	 * a "more" line, or to a title with their count, when the screen is short.
 	 */
-	private headerPlan(status: AskStatus): { prompt: boolean; open: HeaderList; closed: HeaderList } {
+	private headerPlan(status: AskStatus): { prompt: boolean; open: HeaderList; note: boolean; closed: HeaderList } {
 		const room = this.available() - 3 - MIN_BODY;
-		if (room < 1) return { prompt: false, open: NO_LIST, closed: NO_LIST };
+		if (room < 1) return { prompt: false, open: NO_LIST, note: false, closed: NO_LIST };
 		const open = headerList(status.open.length, room - 1);
-		const closed = headerList(status.closed.length, room - 1 - headerListRows(open));
-		return { prompt: true, open, closed };
+		const note = this.untracked > 0 && room - 1 - headerListRows(open) >= 1;
+		const closed = headerList(status.closed.length, room - 1 - headerListRows(open) - (note ? 1 : 0));
+		return { prompt: true, open, note, closed };
 	}
 
 	/** `  • <ask>  → P13` or `  • <ask>  dismissed`; the ask is cut first. */
@@ -885,6 +896,13 @@ export class RepliesView implements Component {
 			}
 			if (open.shown && open.hidden) lines.push(theme.fg("muted", `  … ${open.hidden} more in the reply`));
 		}
+		if (plan.note) {
+			const count = this.untracked === 1 ? "1 more question" : `${this.untracked} more questions`;
+			const verb = this.untracked === 1 ? "is" : "are";
+			lines.push(
+				theme.fg("muted", `${count} outside the decision section ${verb} not tracked (--reply-thread-asks all tracks them).`),
+			);
+		}
 		if (closed.title) {
 			const count = closed.shown ? "" : ` (${closed.hidden})`;
 			lines.push(theme.fg("muted", theme.bold(`✓ Answered${count}`)));
@@ -897,7 +915,7 @@ export class RepliesView implements Component {
 	/** Body rows of the viewer: the screen minus both borders and, when there is a header, it and its separator. */
 	private viewerHeight(): number {
 		const plan = this.headerPlan(this.askStatus(this.reply as Reply));
-		const header = (plan.prompt ? 1 : 0) + headerListRows(plan.open) + headerListRows(plan.closed);
+		const header = (plan.prompt ? 1 : 0) + headerListRows(plan.open) + (plan.note ? 1 : 0) + headerListRows(plan.closed);
 		return Math.max(1, this.available() - 2 - (header ? header + 1 : 0));
 	}
 

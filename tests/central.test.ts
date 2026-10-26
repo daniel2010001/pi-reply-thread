@@ -11,6 +11,7 @@ import {
 import { stripTerminalSequences, type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { RepliesView } from "../extensions/replies-view.ts";
+import type { AskMode } from "../src/asks.ts";
 import type { AnswerFormat } from "../src/format.ts";
 import { type AskAction, buildAsks } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
@@ -46,7 +47,7 @@ function bg(token: ThemeBg): string {
 /** The central over a branch; `act` appends the entry as Pi would and rebuilds from the branch. */
 function central(
 	entries: SessionEntry[],
-	options: { rows?: number; tab?: "pending" | "replies"; format?: AnswerFormat } = {},
+	options: { rows?: number; tab?: "pending" | "replies"; format?: AnswerFormat; mode?: AskMode } = {},
 ) {
 	let closed: { paste?: string } | undefined;
 	const actions: AskAction[] = [];
@@ -55,21 +56,24 @@ function central(
 	const act = (action: AskAction) => {
 		actions.push(action);
 		entries.push(askEntry(action as unknown as Record<string, string>));
-		return buildAsks(entries);
+		return buildAsks(entries, buildThreads(entries, mode));
 	};
+	const mode = options.mode ?? "section";
+	const threads = buildThreads(entries, mode);
 	const component = new RepliesView(
 		tui,
 		theme,
 		keybindings,
-		buildThreads(entries),
+		threads,
 		(paste?: string) => (closed = { paste }),
 		undefined,
 		{
-			...buildAsks(entries),
+			...buildAsks(entries, threads),
 			act,
 			tab: options.tab,
 			format: options.format ?? "lines",
 			setFormat: (format) => formats.push(format),
+			mode,
 		},
 	);
 	const key = (data: string) => component.handleInput(KEYS[data] ?? data);
@@ -670,8 +674,80 @@ describe("key help", () => {
 				const last = view.text(width);
 				expect(last.length).toBeLessThanOrEqual(cap);
 				expect(last.every((line) => visibleWidth(line) === width)).toBe(true);
-				expect(last.at(-2)).toMatch(/^│ {3}esc, q /);
+				expect(last.at(-3)).toMatch(/^│ {3}esc, q /);
+				expect(last.at(-2)).toMatch(/^│ Asks: decision sect/);
 			}
+		}
+	});
+});
+
+describe("ask mode in the central", () => {
+	const NOTE = "outside the decision section";
+
+	const reply = (questions: number) => {
+		resetIds();
+		const outside = Array.from({ length: questions }, (_, index) => `Question ${index + 1} outside?`);
+		const lines = Array.from({ length: 30 }, (_, index) => `Line ${index + 1}`);
+		const text = [...outside, "", "## Needs your decision", "", "1. Merge now", "", ...lines].join("\n");
+		return [user("go"), assistant(text, { id: "a1b2c3d4" })];
+	};
+
+	it("notes the untracked questions under the open asks, muted, singular or plural", () => {
+		const two = central(reply(2), { rows: 30 });
+		two.key("o");
+		const rows = two.text(140);
+		expect(rows.slice(1, 5)).toEqual([
+			expect.stringMatching(/^│ ▌ go +│$/),
+			expect.stringMatching(/^│ ⚠ Waits on you +│$/),
+			expect.stringMatching(/^│   • Merge now +│$/),
+			expect.stringMatching(
+				/^│ 2 more questions outside the decision section are not tracked \(--reply-thread-asks all tracks them\)\. +│$/,
+			),
+		]);
+		expect(rows[5]).toMatch(/^├─+┤$/);
+		expect(two.lines(140)[4]).toContain(fg("muted"));
+		const one = central(reply(1), { rows: 30 });
+		one.key("o");
+		expect(one.text(140)[4]).toMatch(
+			/^│ 1 more question outside the decision section is not tracked \(--reply-thread-asks all tracks them\)\. +│$/,
+		);
+	});
+
+	it("leaves the note out in all mode and when every question is tracked", () => {
+		const all = central(reply(2), { mode: "all" });
+		all.key("o");
+		expect(all.text(140).some((line) => line.includes(NOTE))).toBe(false);
+		const none = central(reply(0));
+		none.key("o");
+		expect(none.text(140).some((line) => line.includes(NOTE))).toBe(false);
+	});
+
+	it("fits the note within the overlay cap on any screen, at exact widths", () => {
+		for (const rows of [8, 10, 12, 14, 24]) {
+			const cap = Math.min(rows - 4, Math.floor(rows * 0.9));
+			for (const width of [24, 80, 140]) {
+				const view = central(reply(3), { rows });
+				view.key("o");
+				const lines = view.text(width);
+				expect(lines.length).toBeLessThanOrEqual(cap);
+				expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
+				expect(lines.at(-1)).toMatch(/^╰─/);
+			}
+		}
+		const view = central(reply(3), { rows: 14 });
+		view.key("o");
+		expect(view.text(140).some((line) => line.includes(NOTE))).toBe(true);
+	});
+
+	it("names the mode on the last line of the key help", () => {
+		for (const [mode, line] of [
+			["section", "Asks: decision section only"],
+			["all", "Asks: every question"],
+		] as const) {
+			const view = central(reply(1), { rows: 60, mode });
+			view.key("?");
+			const rows = view.text(100);
+			expect(rows.at(-2)).toMatch(new RegExp(`^│ ${line} +│$`));
 		}
 	});
 });

@@ -1,5 +1,5 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { detectOpenAsks } from "./asks.ts";
+import { type AskMode, detectOpenAsks } from "./asks.ts";
 
 export type TriggerKind = "prompt" | "job" | "monitor" | "worker" | "session" | "other";
 
@@ -83,9 +83,10 @@ export function triggerOf(customType: string, content: Content): Trigger {
 
 /**
  * Groups the final assistant replies of a session branch under the prompt that preceded them.
- * Pass `ctx.sessionManager.getBranch()`: abandoned branches are alternative histories.
+ * Pass `ctx.sessionManager.getBranch()`: abandoned branches are alternative histories. `mode` says
+ * which lines of a reply are its open asks (see `detectOpenAsks`).
  */
-export function buildThreads(entries: readonly SessionEntry[]): Thread[] {
+export function buildThreads(entries: readonly SessionEntry[], mode: AskMode = "section"): Thread[] {
 	const threads: Thread[] = [];
 	let current: Thread | undefined;
 	let pending: Trigger[] = [];
@@ -130,7 +131,7 @@ export function buildThreads(entries: readonly SessionEntry[]): Thread[] {
 			timestamp: entry.timestamp,
 			text,
 			triggers: pending,
-			openAsks: detectOpenAsks(text),
+			openAsks: detectOpenAsks(text, mode),
 		});
 		pending = [];
 	}

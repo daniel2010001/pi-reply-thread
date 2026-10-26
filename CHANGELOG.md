@@ -9,7 +9,8 @@
 - Mark the replies that wait on you: lines that end with `?` and decision markers, outside code,
   quotes and tables. A marker inside double quotes is only mentioned and does not count, a heading
   that ends in `?` is a section title, and so is a marker heading (`## Needs your decision`) with
-  asks under it. Every list item of a marker section is an ask, even without `?`.
+  asks under it. Every top-level list item of a marker section is an ask, even without `?`; nested
+  items are not.
 - `/replies` opens a themed index of the branch and a full-reply viewer; `/replies <P#.R# | entry ID>`
   opens one reply directly; `Alt+R` opens the index without typing. Plain-text output outside the TUI.
 - A widget above the editor summarizes the latest prompt while it has two or more replies, and counts
@@ -33,3 +34,8 @@
   card with every key.
 - English everywhere: the yes key is `y` and pastes `Yes.`.
 - README: a recommended `AGENTS.md` instruction that gathers the agent's asks in a final `## Needs your decision` section, one numbered ask per item, each ending with `?`.
+- Ask modes: by default (`section`), a reply with a decision section (`## Needs your decision` with
+  asks under it) asks only that section's top-level items and questions, so `Q#` matches the item
+  number; `--reply-thread-asks all` (`gsh -- --reply-thread-asks all`) also tracks every question
+  elsewhere in the reply. An unknown value works as `section` with a warning. The reply viewer notes
+  the questions it leaves untracked, and the `?` card names the mode. README: "How asks are found".

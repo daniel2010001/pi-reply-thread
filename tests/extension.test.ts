@@ -19,8 +19,10 @@ interface Shortcut {
 	handler: (ctx: unknown) => Promise<void> | void;
 }
 
-function load() {
+/** `flag` is what `pi.getFlag("reply-thread-asks")` returns; Pi gives the default when the flag is not passed. */
+function load(flag: string | boolean | undefined = "section") {
 	const appended: [string, unknown][] = [];
+	const flags = new Map<string, unknown>();
 	const commands = new Map<string, Command>();
 	const shortcuts = new Map<string, Shortcut>();
 	const handlers = new Map<string, Handler[]>();
@@ -28,6 +30,8 @@ function load() {
 		registerCommand: (name: string, options: Command) => commands.set(name, options),
 		registerShortcut: (key: string, options: Shortcut) => shortcuts.set(key, options),
 		on: (event: string, handler: Handler) => handlers.set(event, [...(handlers.get(event) ?? []), handler]),
+		registerFlag: (name: string, options: unknown) => flags.set(name, options),
+		getFlag: (name: string) => (name === "reply-thread-asks" ? flag : undefined),
 		appendEntry: (customType: string, data: unknown) => {
 			appended.push([customType, data]);
 			branch.push(customEntry(customType, data));
@@ -37,7 +41,7 @@ function load() {
 	const emit = async (event: string, ctx: unknown) => {
 		for (const handler of handlers.get(event) ?? []) await handler({ type: event }, ctx);
 	};
-	return { commands, shortcuts, emit, appended };
+	return { commands, shortcuts, emit, appended, flags };
 }
 
 const KEYS: Record<string, string> = { "tui.select.confirm": "\r", "tui.select.cancel": "\x1b", "tui.select.down": "\x1b[B" };
@@ -48,7 +52,7 @@ interface Overlay {
 	render(width: number): string[];
 }
 
-/** `keys` are pressed in the overlay once it opens; `seen` keeps its first frame. */
+/** `keys` are pressed in the overlay once it opens; `seen` keeps its first frame and, after keys, its last. */
 function fakeCtx(branch: SessionEntry[], mode: "tui" | "print" = "print", keys: string[] = []) {
 	const pastes: string[] = [];
 	const seen: string[][] = [];
@@ -69,7 +73,8 @@ function fakeCtx(branch: SessionEntry[], mode: "tui" | "print" = "print", keys: 
 					const overlay = make(tui, fakeTheme, keybindings, resolve);
 					seen.push(overlay.render(80).map(stripTerminalSequences));
 					for (const key of keys) overlay.handleInput(KEYS[key] ?? key);
-					if (!keys.length) resolve(undefined);
+					if (keys.length) seen.push(overlay.render(80).map(stripTerminalSequences));
+					else resolve(undefined);
 				});
 			},
 			pasteToEditor: (text: string) => pastes.push(text),
@@ -334,5 +339,90 @@ describe("pending central", () => {
 		await commands.get("replies")!.handler("pending", ctx);
 		expect(seen[0][0]).toMatch(/^╭─ Pending /);
 		expect(seen[0][1]).toMatch(/^│ Nothing waits on you\. +│$/);
+	});
+});
+
+describe("ask mode flag", () => {
+	const text = "Should I rebase first?\n\n## Needs your decision\n\n1. Merge now\n2. Tag it";
+
+	beforeEach(() => {
+		branch[1] = assistant(text, { id: "a1b2c3d4" });
+	});
+
+	it("registers --reply-thread-asks as a string flag that defaults to section", () => {
+		const { flags } = load();
+		expect(flags.get("reply-thread-asks")).toEqual({
+			type: "string",
+			default: "section",
+			description:
+				'Which lines of a reply are asks: "section" (default) tracks only the decision section when a reply has one, "all" tracks every question',
+		});
+	});
+
+	it("tracks only the decision section by default and every question with all", async () => {
+		const section = load();
+		const quiet = fakeCtx(branch);
+		await section.commands.get("replies")!.handler("pending", quiet.ctx);
+		expect(quiet.notices).toEqual([["P1.R1.Q1  a1b2c3d4.1  Merge now\nP1.R1.Q2  a1b2c3d4.2  Tag it", "info"]]);
+		const all = load("all");
+		const every = fakeCtx(branch);
+		await all.commands.get("replies")!.handler("pending", every.ctx);
+		expect(every.notices).toEqual([
+			[
+				"P1.R1.Q1  a1b2c3d4.1  Should I rebase first?\nP1.R1.Q2  a1b2c3d4.2  Merge now\nP1.R1.Q3  a1b2c3d4.3  Tag it",
+				"info",
+			],
+		]);
+		const widget = fakeCtx(branch, "tui");
+		await all.emit("session_start", widget.ctx);
+		expect(widgetText(widget.widgets[0][1])).toEqual([
+			"P1 · 2 replies: R1 prompt ⚠ · R2 job: tests · alt+r",
+			"⚠ 3 pending · newest: P1.R1.Q3 Tag it · alt+r",
+		]);
+		expect(widget.notices).toEqual([]);
+	});
+
+	it("keeps the mode after a central action rebuilds the asks", async () => {
+		const { commands, appended } = load("all");
+		const { ctx, seen } = fakeCtx(branch, "tui", ["x", "tui.select.cancel"]);
+		await commands.get("replies")!.handler("", ctx);
+		expect(seen[0][0]).toMatch(/ 3 open · 0 linked ─╮$/);
+		expect(seen[1][0]).toMatch(/ 2 open · 0 linked ─╮$/);
+		expect(seen[1].join("\n")).toContain("Merge now");
+		expect(appended).toEqual([["reply-thread.ask", { action: "dismiss", ask: "a1b2c3d4.1" }]]);
+		const after = fakeCtx(branch, "tui");
+		await commands.get("replies")!.handler("", after.ctx);
+		expect(after.seen[0][0]).toMatch(/ 2 open · 0 linked ─╮$/);
+	});
+
+	it("treats any other value as section and warns once per session start, in the TUI only", async () => {
+		for (const value of ["every", true]) {
+			const { commands, emit } = load(value);
+			const tui = fakeCtx(branch, "tui");
+			await emit("session_start", tui.ctx);
+			await emit("message_end", tui.ctx);
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			const warning = `Unknown --reply-thread-asks "${value}"; using "section". Use "section" or "all".`;
+			expect(tui.notices).toEqual([[warning, "warning"]]);
+			await emit("session_start", tui.ctx);
+			expect(tui.notices).toEqual([
+				[warning, "warning"],
+				[warning, "warning"],
+			]);
+			const print = fakeCtx(branch);
+			await emit("session_start", print.ctx);
+			await commands.get("replies")!.handler("pending", print.ctx);
+			expect(print.notices).toEqual([["P1.R1.Q1  a1b2c3d4.1  Merge now\nP1.R1.Q2  a1b2c3d4.2  Tag it", "info"]]);
+		}
+	});
+
+	it("uses section without a warning when Pi has no value for the flag", async () => {
+		const { commands, emit } = load(undefined);
+		const { ctx, notices } = fakeCtx(branch, "tui");
+		await emit("session_start", ctx);
+		expect(notices).toEqual([]);
+		const print = fakeCtx(branch);
+		await commands.get("replies")!.handler("pending", print.ctx);
+		expect(print.notices).toEqual([["P1.R1.Q1  a1b2c3d4.1  Merge now\nP1.R1.Q2  a1b2c3d4.2  Tag it", "info"]]);
 	});
 });

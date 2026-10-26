@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";
+import type { AskMode } from "../src/asks.ts";
 import { answerFormat, FORMAT_ENTRY, formatIndex, formatPending, formatReplyPlain, widgetLines } from "../src/format.ts";
 import { findReply, noMatchMessage } from "../src/lookup.ts";
 import { ASK_ENTRY, type AskAction, buildAsks, buildPending } from "../src/pending.ts";
@@ -14,10 +15,28 @@ const SHORTCUT = "alt+r";
 const DESCRIPTION =
 	"List the replies of each prompt and the asks waiting on you; /replies <P#.R#[.Q#] | entry ID[.#]> opens one in full, /replies pending lists the open asks";
 
-function refreshWidget(ctx: ExtensionContext): void {
+/** Which lines of a reply are asks; Gentle Shell passes it after `--`. */
+const FLAG = "reply-thread-asks";
+
+const FLAG_DESCRIPTION =
+	'Which lines of a reply are asks: "section" (default) tracks only the decision section when a reply has one, "all" tracks every question';
+
+/** The ask mode the flag asks for; any other value is `section`. */
+function askMode(pi: ExtensionAPI): AskMode {
+	return pi.getFlag(FLAG) === "all" ? "all" : "section";
+}
+
+/** The warning for a flag value that is not a mode; undefined for a mode or no value. */
+function unknownMode(pi: ExtensionAPI): string | undefined {
+	const value = pi.getFlag(FLAG);
+	if (value === undefined || value === "section" || value === "all") return undefined;
+	return `Unknown --${FLAG} "${value}"; using "section". Use "section" or "all".`;
+}
+
+function refreshWidget(pi: ExtensionAPI, ctx: ExtensionContext): void {
 	if (ctx.mode !== "tui") return;
 	const branch = ctx.sessionManager.getBranch();
-	const threads = buildThreads(branch);
+	const threads = buildThreads(branch, askMode(pi));
 	const lines = widgetLines(threads, buildPending(branch, threads));
 	if (!lines) {
 		ctx.ui.setWidget(WIDGET, undefined, { placement: "aboveEditor" });
@@ -39,8 +58,9 @@ function refreshWidget(ctx: ExtensionContext): void {
 /** Writes a central action to the branch, outside the model context, and returns the asks after it. */
 function act(pi: ExtensionAPI, ctx: ExtensionContext, action: AskAction) {
 	pi.appendEntry(ASK_ENTRY, action);
-	refreshWidget(ctx);
-	return buildAsks(ctx.sessionManager.getBranch());
+	refreshWidget(pi, ctx);
+	const branch = ctx.sessionManager.getBranch();
+	return buildAsks(branch, buildThreads(branch, askMode(pi)));
 }
 
 /**
@@ -49,7 +69,8 @@ function act(pi: ExtensionAPI, ctx: ExtensionContext, action: AskAction) {
  */
 async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string): Promise<void> {
 	const branch = ctx.sessionManager.getBranch();
-	const threads = buildThreads(branch);
+	const mode = askMode(pi);
+	const threads = buildThreads(branch, mode);
 	const pendingTab = arg.toLowerCase() === "pending";
 	const reply = arg && !pendingTab ? findReply(threads, arg) : undefined;
 	if (arg && !pendingTab && !reply) {
@@ -69,6 +90,7 @@ async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string)
 		tab: pendingTab ? "pending" : undefined,
 		format: answerFormat(branch),
 		setFormat: (format) => pi.appendEntry(FORMAT_ENTRY, { format }),
+		mode,
 	};
 	const paste = await ctx.ui.custom<string | undefined>(
 		(tui, theme, keybindings, done) => new RepliesView(tui, theme, keybindings, threads, done, reply, central),
@@ -78,6 +100,8 @@ async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string)
 }
 
 export default function replyThread(pi: ExtensionAPI): void {
+	pi.registerFlag(FLAG, { type: "string", default: "section", description: FLAG_DESCRIPTION });
+
 	pi.registerCommand("replies", {
 		description: DESCRIPTION,
 		handler: (args, ctx) => openReplies(pi, ctx, args.trim()),
@@ -88,7 +112,11 @@ export default function replyThread(pi: ExtensionAPI): void {
 		handler: (ctx) => openReplies(pi, ctx, ""),
 	});
 
-	pi.on("session_start", (_event, ctx) => refreshWidget(ctx));
+	pi.on("session_start", (_event, ctx) => {
+		const warning = unknownMode(pi);
+		if (warning && ctx.mode === "tui") ctx.ui.notify(warning, "warning");
+		refreshWidget(pi, ctx);
+	});
 
 	// Pi stores the message only after the message_end handlers return, so read the branch on the next tick.
 	let pending: ReturnType<typeof setTimeout> | undefined;
@@ -98,7 +126,7 @@ export default function replyThread(pi: ExtensionAPI): void {
 		pending = setTimeout(() => {
 			pending = undefined;
 			try {
-				refreshWidget(ctx);
+				refreshWidget(pi, ctx);
 			} catch {
 				// The session was replaced or shut down before the tick; its next session_start redraws.
 			}
