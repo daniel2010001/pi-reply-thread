@@ -56,7 +56,7 @@ opened by ID closes on `Esc`. In any tab, `?` shows a card with every key; `?` o
 Its last line names the ask mode in use (`Asks: decision section only` or `Asks: every question`).
 
 Outside the interactive TUI (print or RPC mode), `/replies` and `Alt+R` send the index or the reply as plain
-text, and `/replies pending` sends the open asks, one per line (`P12.R1.Q1  a1b2c3d4.1  Which one do you prefer?`),
+text (the index marks a reply `⚠` while it has an open ask and `✓` once all its asks are closed), and `/replies pending` sends the open asks, one per line (`P12.R1.Q1  a1b2c3d4.1  Which one do you prefer?`),
 or `Nothing waits on you.`
 
 ### Reply IDs

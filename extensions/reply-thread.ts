@@ -79,7 +79,7 @@ async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string)
 	}
 	const { pending, closed } = buildAsks(branch, threads);
 	if (ctx.mode !== "tui") {
-		const text = pendingTab ? formatPending(pending) : reply ? formatReplyPlain(reply) : formatIndex(threads);
+		const text = pendingTab ? formatPending(pending) : reply ? formatReplyPlain(reply) : formatIndex(threads, pending);
 		ctx.ui.notify(text, "info");
 		return;
 	}

@@ -24,7 +24,7 @@
   closes only when a later prompt cites its ID or it is dismissed; linked asks close together.
   Prompts beyond the 10 newest fold into `Older (N)`. `/replies pending` lists the open asks as
   plain text, and `/replies <question ID>` opens the reply that asks it.
-- `⚠` marks a reply, in the index, the viewer and the widget, only while one of its asks is open; a
+- `⚠` marks a reply, in the index (the plain-text one too), the viewer and the widget, only while one of its asks is open; a
   reply whose asks are all answered or dismissed shows `✓`, and the viewer lists its closed asks
   under `✓ Answered` with `→ P13` or `dismissed`.
 - An **Answered** tab (`Tab` cycles Pending → Replies → Answered) lists the closed asks with the

@@ -17,6 +17,7 @@ import {
 	triggerText,
 	widgetLines,
 } from "../src/format.ts";
+import { questionIds } from "../src/pending.ts";
 import type { Reply, Thread, Trigger } from "../src/threads.ts";
 
 function reply(
@@ -133,6 +134,26 @@ describe("rows", () => {
 			].join("\n"),
 		);
 		expect(formatIndex([])).toBe("No replies on this branch yet.");
+	});
+
+	it("marks ⚠ only on replies with an open ask and ✓ on the rest that asked, given the open asks", () => {
+		const [r1, r2, r3] = p12.replies;
+		const thread: Thread = { ...p12, replies: [r1, { ...r2, openAsks: ["¿Mergeo?", "¿Taggeo?"] }, r3] };
+		const open = questionIds(thread.replies[1]).slice(0, 1);
+		expect(formatIndex([p11, thread], open).split("\n").slice(1, 4)).toEqual([
+			"  P12.R1  a1b2c3d4  prompt  ✓",
+			"  P12.R2  e5f6a7b8  job: tests  ⚠",
+			"  P12.R3  c9d0e1f2  worker: docs",
+		]);
+		expect(formatIndex([p11, thread], []).split("\n").slice(1, 3)).toEqual([
+			"  P12.R1  a1b2c3d4  prompt  ✓",
+			"  P12.R2  e5f6a7b8  job: tests  ✓",
+		]);
+		const chain = [{ ...questionIds(thread.replies[1])[0], chain: questionIds(r1) }];
+		expect(formatIndex([p11, thread], chain).split("\n").slice(1, 3)).toEqual([
+			"  P12.R1  a1b2c3d4  prompt  ⚠",
+			"  P12.R2  e5f6a7b8  job: tests  ⚠",
+		]);
 	});
 
 	it("formats the viewer header and the plain-text reply", () => {

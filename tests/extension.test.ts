@@ -426,3 +426,34 @@ describe("ask mode flag", () => {
 		expect(print.notices).toEqual([["P1.R1.Q1  a1b2c3d4.1  Merge now\nP1.R1.Q2  a1b2c3d4.2  Tag it", "info"]]);
 	});
 });
+
+describe("plain-text index", () => {
+	it("shows ⚠ only on replies with an open ask and ✓ on replies whose asks are all closed", async () => {
+		branch[1] = assistant("¿Cuál preferís?\n\n¿La subo?", { id: "a1b2c3d4" });
+		branch[3] = assistant("Tests en verde. ¿Mergeo?", { id: "e5f6a7b8" });
+		branch.push(user("otra cosa"), assistant("Listo.", { id: "f0f0f0f0" }));
+		const index = async () => {
+			const { commands } = load();
+			const { ctx, notices } = fakeCtx(branch);
+			await commands.get("replies")!.handler("", ctx);
+			return notices;
+		};
+		const rows = (first: string, second: string) => [
+			[
+				[
+					"P2 · 12:00 · otra cosa",
+					"  P2.R1  f0f0f0f0  prompt",
+					"P1 · 12:00 · buscá si existe algo así",
+					`  P1.R1  a1b2c3d4  prompt${first}`,
+					`  P1.R2  e5f6a7b8  job: tests${second}`,
+				].join("\n"),
+				"info",
+			],
+		];
+		expect(await index()).toEqual(rows("  ⚠", "  ⚠"));
+		branch.push(askEntry({ action: "dismiss", ask: "a1b2c3d4.1" }));
+		expect(await index()).toEqual(rows("  ⚠", "  ⚠"));
+		branch.push(user("> P1.R1.Q2: ¿La subo?\nR: Sí.\n> P1.R2.Q1: ¿Mergeo?\nR: No."));
+		expect(await index()).toEqual(rows("  ✓", "  ✓").map(([text, type]) => [`P3 · 12:00 · > P1.R1.Q2: ¿La subo?\n${text}`, type]));
+	});
+});

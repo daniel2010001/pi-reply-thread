@@ -43,25 +43,38 @@ export function threadRow(thread: Thread): string {
 	return `P${thread.prompt} · ${formatTime(thread.timestamp)} · ${promptLine(thread)}`;
 }
 
-export function replyRow(reply: Reply): string {
+/**
+ * `P12.R1  a1b2c3d4  prompt`, then `⚠` while the reply has an ask in `open` (unique IDs) and `✓` once all
+ * of its asks are closed. Without `open`, `⚠` marks any reply with an ask.
+ */
+function markedRow(reply: Reply, open?: ReadonlySet<string>): string {
 	const row = `${reply.ordinal}  ${reply.entryId}  ${triggerText(reply.triggers)}`;
-	return reply.openAsks.length ? `${row}  ⚠` : row;
+	if (!reply.openAsks.length) return row;
+	if (!open) return `${row}  ⚠`;
+	return questionIds(reply).some((ask) => open.has(ask.id)) ? `${row}  ⚠` : `${row}  ✓`;
 }
 
-/** Threads newest first, each followed by its replies in order. */
-export function indexRows(threads: readonly Thread[]): IndexRow[] {
+export function replyRow(reply: Reply): string {
+	return markedRow(reply);
+}
+
+/** Threads newest first, each followed by its replies in order; `open` as in `markedRow`. */
+export function indexRows(threads: readonly Thread[], open?: ReadonlySet<string>): IndexRow[] {
 	const rows: IndexRow[] = [];
 	for (const thread of [...threads].reverse()) {
 		rows.push({ text: threadRow(thread), thread });
-		for (const reply of thread.replies) rows.push({ text: replyRow(reply), thread, reply });
+		for (const reply of thread.replies) rows.push({ text: markedRow(reply, open), thread, reply });
 	}
 	return rows;
 }
 
-/** The index as plain text, for modes without the TUI. */
-export function formatIndex(threads: readonly Thread[]): string {
+/** The index as plain text, for modes without the TUI, marking the replies with an ask in `pending`. */
+export function formatIndex(
+	threads: readonly Thread[],
+	pending?: readonly (QuestionId & { chain?: readonly QuestionId[] })[],
+): string {
 	if (!threads.length) return "No replies on this branch yet.";
-	return indexRows(threads)
+	return indexRows(threads, pending && openIds(pending))
 		.map((row) => (row.reply ? `  ${row.text}` : row.text))
 		.join("\n");
 }
