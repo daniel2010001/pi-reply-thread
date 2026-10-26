@@ -89,7 +89,7 @@ A reply is marked `⚠` when one of its lines asks you something:
   `necesito tu confirmación`. A marker inside double quotes (`"…"`, `“…”`, `«…»`) is only being
   mentioned and does not count.
 
-Code blocks, inline code, blockquotes and table rows are ignored. A heading that ends in `?` (`## Why not a model?`) titles a section and does not count; a decision marker in a heading still does. Detection is deterministic: it
+Code blocks, inline code, blockquotes and table rows are ignored. A heading that ends in `?` (`## Why not a model?`) titles a section and does not count; a decision marker in a heading (`## Needs your decision`) counts only while its section, up to the next heading, has no ask of its own, so a final section that lists the asks yields those asks and not its title. Detection is deterministic: it
 can miss an ask phrased without a question mark, and it can flag a rhetorical question.
 
 The reply viewer lists the open asks of a reply above its text.

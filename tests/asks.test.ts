@@ -161,8 +161,28 @@ describe("detectOpenAsks", () => {
 		).toEqual([]);
 	});
 
-	it("still takes a decision marker in a heading as an ask", () => {
+	it("still takes a decision marker in a heading as an ask when no ask is under it", () => {
 		expect(detectOpenAsks("## Needs your decision\n\n- A or B")).toEqual(["Needs your decision"]);
+		expect(detectOpenAsks("Done.\n\n## Necesito tu OK")).toEqual(["Necesito tu OK"]);
+		expect(detectOpenAsks("## Needs your decision\n\n```\nship it?\n```\n> Merge?\n| A? |")).toEqual(["Needs your decision"]);
+	});
+
+	it("takes a marker heading with asks under it as the title of its section, not an ask", () => {
+		expect(
+			detectOpenAsks(
+				["Tests are green.", "", "## Needs your decision", "", "- Merge now?", "- Necesito tu OK para pushear."].join("\n"),
+			),
+		).toEqual(["Merge now?", "Necesito tu OK para pushear."]);
+		expect(detectOpenAsks("### **Necesito tu decisión**\n\n1. ¿Borro las ramas?")).toEqual(["¿Borro las ramas?"]);
+	});
+
+	it("does not count an ask under a later heading, of any level, for an earlier marker heading", () => {
+		expect(
+			detectOpenAsks(["## Needs your decision", "- A or B", "", "### Details", "", "¿Seguimos?"].join("\n")),
+		).toEqual(["Needs your decision", "¿Seguimos?"]);
+		expect(
+			detectOpenAsks(["# Necesito tu OK", "- A", "## ¿Por qué?", "Porque sí.", "## Needs your decision", "- Ship it?"].join("\n")),
+		).toEqual(["Necesito tu OK", "Ship it?"]);
 	});
 });
 
