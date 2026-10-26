@@ -666,6 +666,37 @@ describe("/replies triage", () => {
 		expect(confirms[0][1]).toBe(confirmText("2 open asks and 0 later prompts", tokens(entries).about));
 	});
 
+	it("sends the system prompt of the last turn, which pi-claude-bridge recorded, not the idle one", async () => {
+		const TURN = `${SESSION_PROMPT}\n\n# Added by extensions at before_agent_start`;
+		const OLDER = `${SESSION_PROMPT}\n\n# An older turn`;
+		const { commands, emit } = load();
+		await emit("agent_start", { getSystemPrompt: () => OLDER });
+		await emit("turn_start", { getSystemPrompt: () => TURN });
+		const triage = fakeCtx(branch, "tui", [], { model: MODEL, confirm: false });
+		await commands.get("replies")!.handler("triage", triage.ctx);
+		const { message } = tokens(branch);
+		const about = Math.ceil((TURN.length + message.length) / 4);
+		expect(triage.confirms[0][1]).toBe(confirmText("1 open ask and 1 later prompt", about));
+		const sent = fakeCtx(branch, "tui", ["tui.select.cancel"], { model: MODEL, reply: reply(ONE) });
+		await commands.get("replies")!.handler("triage", sent.ctx);
+		expect(sent.calls[0][1]).toMatchObject({ systemPrompt: TURN });
+	});
+
+	it("explains a pi-claude-bridge prompt-capture failure before any turn ran", async () => {
+		const failure = "prompt-capture: no capture for this 29212-char system prompt, and it embeds none of the 0 known.";
+		const before = fakeCtx(branch, "tui", [], { model: MODEL, reply: reply("", { stopReason: "error", errorMessage: failure }) });
+		const { commands, emit, appended } = load();
+		await commands.get("replies")!.handler("triage", before.ctx);
+		expect(before.notices).toEqual([
+			[`Triage failed: ${failure} Send any prompt first so this session records its system prompt, then run the triage again.`, "error"],
+		]);
+		await emit("turn_start", { getSystemPrompt: () => SESSION_PROMPT });
+		const after = fakeCtx(branch, "tui", [], { model: MODEL, reply: reply("", { stopReason: "error", errorMessage: failure }) });
+		await commands.get("replies")!.handler("triage", after.ctx);
+		expect(after.notices).toEqual([[`Triage failed: ${failure}`, "error"]]);
+		expect(appended).toEqual([]);
+	});
+
 	it("sends the request to the session model under a loader, stores the proposals, refreshes the widget and opens Pending", async () => {
 		const { commands, appended } = load();
 		const triage = fakeCtx(branch, "tui", ["tui.select.cancel"], { model: MODEL, reply: reply(ONE) });

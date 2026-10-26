@@ -332,7 +332,9 @@ ask the same thing in other words.
   under your session's system prompt, unchanged. No other message of the session goes.
 - **Why the system prompt goes too**: some providers accept only the session's own system prompt.
   `pi-claude-bridge`, for one, rejects any other (`prompt-capture: no capture for this … system
-  prompt`), so the instructions travel in the message instead.
+  prompt`), so the instructions travel in the message instead. The system prompt sent is the one of
+  your latest turn, the one the bridge recorded; right after `/reload` no turn has run yet, so send any
+  prompt first (the error says so).
 - **Cost**: it is one model call on your account, and the session's system prompt (often thousands
   of tokens with your context files and skills) is most of it. A confirm names the model, how many
   asks and prompts it sends and their rough size in tokens, system prompt included; declining sends

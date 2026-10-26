@@ -37,6 +37,16 @@ function unknownMode(pi: ExtensionAPI): string | undefined {
 	return `Unknown --${FLAG} "${value}"; using "section". Use "section" or "all".`;
 }
 
+/**
+ * The system prompt of the latest turn of each loaded extension. Between turns `ctx.getSystemPrompt()`
+ * returns the prompt before the extensions' `before_agent_start` changes, which pi-claude-bridge never
+ * recorded and refuses; the one read while a turn runs is the one it knows.
+ */
+const turnPrompts = new WeakMap<ExtensionAPI, string>();
+
+/** What pi-claude-bridge says when it does not know the system prompt it is given. */
+const CAPTURE_FAILURE = "prompt-capture:";
+
 function plural(count: number, one: string, many: string): string {
 	return `${count} ${count === 1 ? one : many}`;
 }
@@ -136,7 +146,8 @@ async function triage(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
 	}
 	const name = `${model.provider}/${model.id}`;
 	// pi-claude-bridge accepts only the session's own system prompt, so the instructions lead the message.
-	const systemPrompt = ctx.getSystemPrompt();
+	const turnPrompt = turnPrompts.get(pi);
+	const systemPrompt = turnPrompt ?? ctx.getSystemPrompt();
 	const message = `${request.instructions}\n\n${request.text}`;
 	const sent = `${plural(request.asks, "open ask", "open asks")} and ${plural(request.prompts, "later prompt", "later prompts")}`;
 	const tokens = Math.ceil((systemPrompt.length + message.length) / 4);
@@ -179,7 +190,11 @@ async function triage(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
 		return;
 	}
 	if ("error" in outcome) {
-		ctx.ui.notify(`Triage failed: ${outcome.error}`, "error");
+		const hint =
+			!turnPrompt && outcome.error.includes(CAPTURE_FAILURE)
+				? " Send any prompt first so this session records its system prompt, then run the triage again."
+				: "";
+		ctx.ui.notify(`Triage failed: ${outcome.error}${hint}`, "error");
 		return;
 	}
 	const proposals = parseTriage(outcome.text, state, threads);
@@ -231,6 +246,12 @@ export default function replyThread(pi: ExtensionAPI): void {
 			}
 		}, 0);
 	});
+
+	const recordTurnPrompt = (_event: unknown, ctx: ExtensionContext) => {
+		turnPrompts.set(pi, ctx.getSystemPrompt());
+	};
+	pi.on("agent_start", recordTurnPrompt);
+	pi.on("turn_start", recordTurnPrompt);
 
 	pi.on("session_shutdown", () => {
 		clearTimeout(pending);

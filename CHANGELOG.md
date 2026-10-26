@@ -16,6 +16,8 @@
 - The triage works through `pi-claude-bridge`: it sends your session's system prompt unchanged (the
   bridge rejects any other) and puts its instructions in the message. The confirm's token estimate
   counts that system prompt too (`with your session's system prompt`).
+  It is the system prompt of the latest turn (the idle one lacks what extensions add per turn, and the
+  bridge refuses it); before any turn since loading, a bridge failure says to send a prompt first.
 
 ## 0.1.0 (2026-10-26)
 
