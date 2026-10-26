@@ -353,8 +353,9 @@ pnpm demo                      # prints the file it wrote and the command to ope
 pi --session <file> -e ./extensions/reply-thread.ts
 ```
 
-Its Pending tab has two rows with `≈ 1 similar` to expand with `→` and link with `l`, and a `## …?`
-section title that is not an ask. Pi appends to the file when you use it, so write a new one for a fresh start.
+The session is in English: three prompts, a reply woken by a background job notice, and a
+`## Why did it take so long?` section title that is not an ask. Its Pending tab has two rows with
+`≈ 1 similar` to expand with `→` and link with `l`. Pi appends to the file when you use it, so write a new one for a fresh start.
 
 ## License
 

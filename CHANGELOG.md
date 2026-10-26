@@ -54,3 +54,5 @@
 - Looks answered: an open Pending row like an older answered or dismissed ask (a hidden ask of its
   group too) shows `✓? like <ID>` with the newest such ask, after `↺` and `≈ N similar`. Nothing
   closes by itself; answer it or press `x`. The `?` card explains it.
+- The demo session (`pnpm demo`) is in English, with the same two repeat groups, job notice and
+  `## …?` section title.

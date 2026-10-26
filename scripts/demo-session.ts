@@ -20,14 +20,14 @@ export interface DemoEntry {
 
 /** Prompt → reply pairs and notices that leave repeats (`≈`), a chain to build with `l`, and a heading. */
 const SCRIPT: readonly (["user" | "assistant", string] | ["job", string, string])[] = [
-	["user", "Medí el consumo de la desktop."],
-	["assistant", "Listo, 41 W en reposo.\n\nLas mediciones dejaron archivos en `/tmp`: ¿los borro?"],
-	["user", "Revisá el push de lab-ai."],
-	["assistant", "Hay 2 commits nuevos en `lab-ai`.\n\nPush de los 2 commits de lab-ai a origin/main: ¿lo hago?"],
+	["user", "Measure the desktop's power draw."],
+	["assistant", "Done, 41 W at idle.\n\nThe measurement files are still in `/tmp`: should I delete them?"],
+	["user", "Check the lab-ai push."],
+	["assistant", "There are 2 new commits in `lab-ai`.\n\nPush the 2 lab-ai commits to origin/main: should I do it?"],
 	["job", "job-1", "tests"],
-	["assistant", "Tests en verde.\n\n## ¿Por qué tardó tanto?\n\nEl primer arranque compila los módulos.\n\nPush de los 2 commits nuevos de lab-ai a origin/main: ¿lo hago?"],
-	["user", "Seguimos con el panel."],
-	["assistant", "El panel ya muestra la CPU.\n\n- ¿Borro los archivos temporales de las mediciones en /tmp?\n- ¿Sumo la GPU al panel?"],
+	["assistant", "Tests are green.\n\n## Why did it take so long?\n\nThe first start compiles the modules.\n\nPush the 2 new lab-ai commits to origin/main: should I do it?"],
+	["user", "Let's continue with the panel."],
+	["assistant", "The panel shows the CPU now.\n\n- Should I delete the measurement files still in /tmp?\n- Should I add the GPU to the panel?"],
 ];
 
 /** Pi's footer adds up every reply's usage, cost included, so a demo reply needs all of it. */
