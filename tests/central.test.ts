@@ -15,7 +15,7 @@ import type { AskMode } from "../src/asks.ts";
 import type { AnswerFormat } from "../src/format.ts";
 import { type AskAction, buildAsks } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
-import { askEntry, assistant, resetIds, user } from "./helpers.ts";
+import { askEntry, assistant, customEntry, resetIds, user } from "./helpers.ts";
 
 const KEYS: Record<string, string> = {
 	"tui.select.up": "\x1b[A",
@@ -1325,6 +1325,216 @@ describe("undo and reopen", () => {
 				if (width === 140) {
 					expect(seen).toContainEqual(expect.stringMatching(UNDO));
 					expect(seen).toContainEqual(expect.stringMatching(REOPEN));
+				}
+			}
+		}
+	});
+});
+
+describe("triage proposals", () => {
+	const BACKSPACE = "\x7f";
+	/** P2 is `seguí` (entry 00000003) and P3 `revisá los tests` (entry 00000005). */
+	const triaged = (proposals: unknown[]) => [...branch, customEntry("reply-thread.triage", { model: "anthropic/test", proposals })];
+	const SAME = { kind: "same", ask: "c9d0e1f2.1", as: "a1b2c3d4.1" };
+	const ANSWERED = { kind: "answered", ask: "a1b2c3d4.2", prompt: "00000003", quote: "seguí" };
+	const LATER = { kind: "answered", ask: "a1b2c3d4.2", prompt: "00000005", quote: "revisá los tests" };
+
+	it("shows the first live proposal under its row, indented under the ask text, with +N more", () => {
+		const view = central(triaged([SAME, ANSWERED, LATER]));
+		const rows = view.text(100);
+		expect(rows.slice(1, -1)).toEqual([
+			expect.stringMatching(/^│ ▌P3  revisá los tests +12:00 │$/),
+			expect.stringMatching(/^│ ›○ P3\.R1\.Q1  ¿Borro las tres ramas viejas\?  ≈ 1 similar +│$/),
+			expect.stringMatching(/^│ {14}✦ same as P1\.R1\.Q1  Hay tres ramas viejas\. ¿Las borro\? +│$/),
+			expect.stringMatching(/^│ ▌P1  limpiá la rama +12:00 │$/),
+			expect.stringMatching(/^│  ○ P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/),
+			expect.stringMatching(/^│ {14}✦ answered in P2: "seguí"  \+1 more +│$/),
+		]);
+		const line = view.lines(100)[3];
+		expect(line).toContain(`${fg("accent")}✦`);
+		expect(line).toContain(`${fg("muted")} same as P1.R1.Q1  Hay tres ramas viejas. ¿Las borro?`);
+		expect(line).not.toContain(bg("selectedBg"));
+		expect(rows[0]).toMatch(/ 2 open · 0 linked ─╮$/);
+	});
+
+	it("shows a proposal under an expanded member that has one", () => {
+		const view = central(triaged([{ kind: "answered", ask: "a1b2c3d4.1", prompt: "00000003", quote: "seguí" }]));
+		expect(view.text(100).some((line) => line.includes("✦"))).toBe(false);
+		view.key(RIGHT);
+		expect(view.text(100).slice(2, 5)).toEqual([
+			expect.stringMatching(/^│ ›○ P3\.R1\.Q1 /),
+			expect.stringMatching(/^│ {4}≈ P1\.R1\.Q1  Hay tres ramas viejas\. ¿Las borro\? +│$/),
+			expect.stringMatching(/^│ {16}✦ answered in P2: "seguí" +│$/),
+		]);
+	});
+
+	it("cuts a long proposal to the width, keeping +N more, and every line keeps the exact width", () => {
+		const long = { ...ANSWERED, quote: "seguí ".repeat(30) };
+		const entries = triaged([long, LATER]);
+		for (const width of [24, 60, 80, 140]) {
+			const lines = central([...entries]).text(width);
+			expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
+		}
+		expect(central([...entries]).text(60)[5]).toMatch(/^│ {14}✦ answered in P2: "seguí seguí.*…  \+1 more │$/);
+	});
+
+	it("skips proposal rows on up, down and page keys", () => {
+		const view = central(triaged([SAME, ANSWERED]));
+		view.key("tui.select.down");
+		expect(view.text(100)[5]).toMatch(/^│ ›○ P1\.R1\.Q2/);
+		view.key("tui.select.down");
+		expect(view.text(100)[5]).toMatch(/^│ ›○ P1\.R1\.Q2/);
+		view.key("tui.select.up");
+		expect(view.text(100)[2]).toMatch(/^│ ›○ P3\.R1\.Q1/);
+		view.key("tui.select.pageDown");
+		expect(view.text(100)[5]).toMatch(/^│ ›○ P1\.R1\.Q2/);
+		expect(view.text(100).filter((line) => line.includes("✦")).every((line) => !line.includes("›"))).toBe(true);
+		view.key("tui.select.pageUp");
+		expect(view.text(100)[2]).toMatch(/^│ ›○ P3\.R1\.Q1/);
+	});
+
+	it("a accepts an answered proposal as an answer entry, and Backspace reopens the ask", () => {
+		const view = central(triaged([SAME, ANSWERED]));
+		const before = view.text(100);
+		view.keys("tui.select.down", "a");
+		expect(view.actions).toEqual([{ action: "answer", ask: "a1b2c3d4.2", prompt: "00000003", text: "seguí" }]);
+		expect(view.text(100)[0]).toMatch(/ 1 open · 0 linked ─╮$/);
+		expect(view.text(100).some((line) => line.includes("P1.R1.Q2"))).toBe(false);
+		view.key("\t");
+		view.key("\t");
+		expect(view.text(100)).toContainEqual(expect.stringMatching(/^│ {4}↳ P2  seguí +│$/));
+		view.key("\t");
+		view.key(BACKSPACE);
+		expect(view.actions.slice(1)).toEqual([{ action: "reopen", ask: "a1b2c3d4.2" }]);
+		view.key("tui.select.up");
+		expect(view.text(100)).toEqual(before);
+	});
+
+	it("a accepts a same proposal as the links of the two rows, and Backspace unlinks them", () => {
+		const view = central(triaged([SAME, ANSWERED]));
+		const before = view.text(100);
+		view.key("a");
+		expect(view.actions).toEqual([{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" }]);
+		expect(view.text(100)[0]).toMatch(/ 2 open · 1 linked ─╮$/);
+		expect(view.text(100)[2]).toMatch(/  ↺ P1\.R1\.Q1 +│$/);
+		view.key(BACKSPACE);
+		expect(view.actions.slice(1)).toEqual([{ action: "unlink", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" }]);
+		expect(view.text(100)).toEqual(before);
+	});
+
+	it("a on a same proposal whose other ask is a chain member links to that chain's row", () => {
+		resetIds();
+		const entries = [
+			user("a"),
+			assistant("¿Subo la versión?\n\n¿Taggeo el release?", { id: "aaaaaaa1" }),
+			askEntry({ action: "link", ask: "aaaaaaa1.2", continues: "aaaaaaa1.1" }),
+			user("b"),
+			assistant("¿Publico en npm?", { id: "aaaaaaa2" }),
+			customEntry("reply-thread.triage", { model: "m", proposals: [{ kind: "same", ask: "aaaaaaa2.1", as: "aaaaaaa1.1" }] }),
+		];
+		const view = central(entries);
+		expect(view.text(100)[3]).toMatch(/✦ same as P1\.R1\.Q1  ¿Subo la versión\?/);
+		view.key("a");
+		expect(view.actions).toEqual([{ action: "link", ask: "aaaaaaa2.1", continues: "aaaaaaa1.1" }]);
+		expect(view.text(100)[0]).toMatch(/ 1 open · 1 linked ─╮$/);
+	});
+
+	it("n rejects the first proposal, the next one shows, and Backspace restores it", () => {
+		const view = central(triaged([ANSWERED, LATER]));
+		const before = view.text(100);
+		view.keys("tui.select.down", "n");
+		expect(view.actions).toEqual([{ action: "reject", ask: "a1b2c3d4.2", proposal: "answered:00000003" }]);
+		expect(view.text(100)[5]).toMatch(/^│ {14}✦ answered in P3: "revisá los tests" +│$/);
+		view.key(BACKSPACE);
+		expect(view.actions.slice(1)).toEqual([{ action: "restore", ask: "a1b2c3d4.2", proposal: "answered:00000003" }]);
+		view.key("tui.select.up");
+		expect(view.text(100)).toEqual(before);
+	});
+
+	it("a and n write nothing on a row without a proposal, or without any triage", () => {
+		const view = central(triaged([ANSWERED]));
+		const before = view.text(100);
+		view.keys("a", "n");
+		expect(view.actions).toEqual([]);
+		expect(view.text(100)).toEqual(before);
+		const plain = central(branch);
+		const shown = plain.text(100);
+		plain.keys("a", "n", "tui.select.down", "a", "n");
+		expect(plain.actions).toEqual([]);
+		expect(plain.closed()).toBeUndefined();
+		plain.key("tui.select.up");
+		expect(plain.text(100)).toEqual(shown);
+	});
+
+	it("keeps the short hints line as it was with proposals on screen", () => {
+		const view = central(triaged([SAME, ANSWERED]));
+		expect(view.text(60).at(-1)).toBe("╰─ enter answer · y yes · f format · ? help · esc close ───╯");
+		expect(view.text(80).at(-1)).toBe(`╰─ enter answer · y yes · f format · ? help · esc close ${"─".repeat(23)}╯`);
+	});
+
+	it("the key help lists a and n with the ✦ note under them and still fits the cap", () => {
+		const ACCEPT = /^│ {3}a +accept the row's ✦ triage proposal +│$/;
+		const REJECT = /^│ {3}n +reject the row's ✦ triage proposal +│$/;
+		const NOTE = /^│ {3}✦ comes from \/replies triage: a model's proposal; nothing closes or links until you press a\. +│$/;
+		const wide = central(branch, { rows: 60 });
+		wide.key("?");
+		const rows = wide.text(140);
+		const answeredAt = rows.findIndex((line) => /^│ Replies +│$/.test(line));
+		const at = rows.findIndex((line) => ACCEPT.test(line));
+		expect(at).toBeGreaterThan(0);
+		expect(at).toBeLessThan(answeredAt);
+		expect(rows[at + 1]).toMatch(REJECT);
+		expect(rows[at + 2]).toMatch(NOTE);
+		expect(wide.lines(140)[at]).toContain(`${fg("accent")}a`);
+		expect(wide.lines(140)[at + 2]).toContain(`${fg("muted")}✦ comes from`);
+		for (const height of [8, 24, 50]) {
+			const cap = Math.min(height - 4, Math.floor(height * 0.9));
+			for (const width of [24, 80, 140]) {
+				const view = central(branch, { rows: height });
+				view.key("?");
+				const seen: string[] = [];
+				for (let press = 0; press < 45; press += 1) {
+					const lines = view.text(width);
+					expect(lines.length).toBeLessThanOrEqual(cap);
+					expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
+					expect(lines.at(-1)).toMatch(/^╰─/);
+					seen.push(...lines);
+					view.key("tui.select.down");
+				}
+				expect(seen.some((line) => line.startsWith("│   a "))).toBe(true);
+				expect(seen.some((line) => line.startsWith("│   ✦ comes from"))).toBe(true);
+				if (width === 140) expect(seen).toContainEqual(expect.stringMatching(NOTE));
+				expect(seen.at(-2)).toMatch(/^│ Asks: decision sect/);
+			}
+		}
+	});
+
+	it("fits the overlay cap with proposals on 8, 24 and 50 rows at exact widths", () => {
+		const many = () => {
+			resetIds();
+			const entries = Array.from({ length: 20 }, (_, index) => [
+				user(`prompt ${index + 1}`),
+				assistant(`¿Primera tema${index + 1}?`, { id: `c${index.toString(16).padStart(7, "0")}` }),
+			]).flat();
+			const proposals = Array.from({ length: 19 }, (_, index) => ({
+				kind: "answered",
+				ask: `c${index.toString(16).padStart(7, "0")}.1`,
+				prompt: entries[2 * index + 2].id,
+				quote: `prompt ${index + 2}`,
+			}));
+			return [...entries, customEntry("reply-thread.triage", { model: "m", proposals })];
+		};
+		for (const rows of [8, 24, 50]) {
+			const cap = Math.min(rows - 4, Math.floor(rows * 0.9));
+			for (const width of [24, 80, 140]) {
+				const view = central(many(), { rows });
+				for (const press of ["", "tui.select.down", "tui.select.pageDown", "tui.select.pageDown", "tui.select.pageUp", "tui.select.up"]) {
+					if (press) view.key(press);
+					const lines = view.text(width);
+					expect(lines.length).toBeLessThanOrEqual(cap);
+					expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
+					expect(lines.at(-1)).toMatch(/^╰─/);
+					expect(lines.slice(1, -1).some((line) => line.includes("›"))).toBe(true);
 				}
 			}
 		}

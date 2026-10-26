@@ -18,6 +18,7 @@ import {
 	type AskState,
 	type ClosedAsk,
 	groupLinks,
+	type LiveProposal,
 	looksAnsweredBy,
 	type PendingAsk,
 	questionIds,
@@ -72,22 +73,35 @@ export interface Central {
 
 /**
  * One line of the Pending tab: a prompt header, an open ask (the newest of its repeat group), an older
- * member of an expanded group, or the folded older prompts.
+ * member of an expanded group, the triage proposal under one of those, or the folded older prompts.
  */
 type PendingRow =
 	| { kind: "prompt"; thread: Thread }
 	| { kind: "ask"; ask: PendingAsk }
 	| { kind: "member"; ask: PendingAsk; head: PendingAsk }
+	| { kind: "proposal"; ask: PendingAsk; member: boolean }
 	| { kind: "older"; count: number };
+
+/** Prompt headers and proposal lines only label the rows under or above them. */
+function selectable(row: PendingRow): boolean {
+	return row.kind !== "prompt" && row.kind !== "proposal";
+}
 
 /** One line of the Answered tab: a prompt header, a closed ask, or the line under it that tells how it closed. */
 type AnsweredRow = { kind: "prompt"; thread: Thread } | { kind: "ask"; row: ClosedAsk } | { kind: "how"; row: ClosedAsk };
 
-/** The entry that undoes an action: a dismiss reopens, a reopen dismisses, a link unlinks the same pair and back. */
+/**
+ * The entry that undoes an action: a dismiss reopens, a reopen dismisses, a link unlinks the same pair and
+ * back, an answer reopens, a reject restores the same proposal and back.
+ */
 function inverse(action: AskAction): AskAction {
 	if (action.action === "link" || action.action === "unlink") {
 		return { action: action.action === "link" ? "unlink" : "link", ask: action.ask, continues: action.continues };
 	}
+	if (action.action === "reject" || action.action === "restore") {
+		return { action: action.action === "reject" ? "restore" : "reject", ask: action.ask, proposal: action.proposal };
+	}
+	if (action.action === "answer") return { action: "reopen", ask: action.ask };
 	return { action: action.action === "dismiss" ? "reopen" : "dismiss", ask: action.ask };
 }
 
@@ -399,11 +413,16 @@ export class RepliesView implements Component {
 		const ordered = [...groups.values()].sort((a, b) => b.thread.prompt - a.thread.prompt);
 		this.listOrder = ordered.flatMap(({ asks }) => asks.flatMap((head) => [head, ...members(head)]));
 		const shown = this.expanded ? ordered : ordered.slice(0, UNFOLDED_PROMPTS);
+		const proposal = (ask: PendingAsk, member: boolean): PendingRow[] =>
+			ask.proposals?.length ? [{ kind: "proposal", ask, member }] : [];
 		const rows: PendingRow[] = shown.flatMap(({ thread, asks }) => [
 			{ kind: "prompt" as const, thread },
 			...asks.flatMap((head) => [
 				{ kind: "ask" as const, ask: head },
-				...(this.unfolded.has(head.id) ? members(head).map((ask) => ({ kind: "member" as const, ask, head })) : []),
+				...proposal(head, false),
+				...(this.unfolded.has(head.id)
+					? members(head).flatMap((ask) => [{ kind: "member" as const, ask, head }, ...proposal(ask, true)])
+					: []),
 			]),
 		]);
 		const folded = ordered.slice(shown.length).reduce((count, group) => count + group.asks.length, 0);
@@ -416,8 +435,8 @@ export class RepliesView implements Component {
 	private selectPending(index: number): void {
 		const rows = this.pendingRows;
 		const at = Math.min(Math.max(0, index), Math.max(0, rows.length - 1));
-		let next = rows.findIndex((row, offset) => offset >= at && row.kind !== "prompt");
-		if (next < 0) next = rows.findLastIndex((row) => row.kind !== "prompt");
+		let next = rows.findIndex((row, offset) => offset >= at && selectable(row));
+		if (next < 0) next = rows.findLastIndex(selectable);
 		this.pendingSelected = Math.max(0, next);
 	}
 
@@ -427,7 +446,7 @@ export class RepliesView implements Component {
 			const candidate = next + Math.sign(step);
 			if (candidate < 0 || candidate >= this.pendingRows.length) break;
 			next = candidate;
-			if (this.pendingRows[next].kind !== "prompt") {
+			if (selectable(this.pendingRows[next])) {
 				this.pendingSelected = next;
 				left -= 1;
 			}
@@ -451,6 +470,20 @@ export class RepliesView implements Component {
 	private markedChain(): Ask[] {
 		const rows = this.pending.filter((ask) => this.marked.has(ask.id));
 		return rows.flatMap((row) => [...row.chain, row]).sort((a, b) => b.seq - a.seq);
+	}
+
+	/**
+	 * The actions that accept a triage proposal: `answered` closes its ask with the quote, `same` links
+	 * the selected row and the row holding the other ask as one chain. Empty when that row is gone.
+	 */
+	private accept(row: PendingAsk, proposal: LiveProposal): AskAction[] {
+		if (proposal.kind === "answered") {
+			return [{ action: "answer", ask: proposal.ask.id, prompt: proposal.prompt.entryId as string, text: proposal.quote }];
+		}
+		const other = this.pending.find(
+			(next) => next.id === proposal.as.id || next.chain.some((member) => member.id === proposal.as.id),
+		);
+		return other ? groupLinks([row, other]) : [];
 	}
 
 	/** Writes the actions of one key, which Backspace can undo as one step. */
@@ -479,6 +512,7 @@ export class RepliesView implements Component {
 		const page = this.listHeight() - 1;
 		const row = this.pendingRows[this.pendingSelected];
 		const ask = this.selectedAsk();
+		const proposal = ask?.proposals?.[0];
 		if (kb.matches(data, "tui.select.cancel")) {
 			this.done();
 			return false;
@@ -524,7 +558,13 @@ export class RepliesView implements Component {
 		} else if (matchesKey(data, "u") && ask?.continues) {
 			this.act([{ action: "unlink", ask: ask.id, continues: ask.continues }]);
 		} else if (matchesKey(data, "o") && ask) this.open(ask.reply, ask.thread);
-		else if (matchesKey(data, "backspace")) this.undo();
+		else if (matchesKey(data, "a") && ask && proposal) {
+			const actions = this.accept(ask, proposal);
+			if (!actions.length) return false;
+			this.act(actions);
+		} else if (matchesKey(data, "n") && proposal) {
+			this.act([{ action: "reject", ask: proposal.ask.id, proposal: proposal.key }]);
+		} else if (matchesKey(data, "backspace")) this.undo();
 		else return false;
 		return true;
 	}
@@ -755,6 +795,24 @@ export class RepliesView implements Component {
 		return selected ? theme.bg("selectedBg", line) : line;
 	}
 
+	/**
+	 * `✦ answered in P2: "<quote>"` or `✦ same as P1.R1.Q2  <ask>`, the row's first proposal, under the ask
+	 * text of its row, muted, with `  +N more` when it has more; the proposal is cut first.
+	 */
+	private proposalLine(ask: PendingAsk, member: boolean, width: number): string {
+		const theme = this.theme;
+		const [first, ...rest] = ask.proposals as LiveProposal[];
+		const indent = (member ? 5 : 3) + this.askOrdinalWidth + 2;
+		const more = rest.length ? `  +${rest.length} more` : "";
+		const text =
+			first.kind === "answered"
+				? ` answered in P${first.prompt.prompt}: "${first.quote}"`
+				: ` same as ${first.as.ordinal}  ${first.as.text}`;
+		const room = width - indent - 1 - visibleWidth(more);
+		const cut = truncateToWidth(text, Math.max(0, room), "…");
+		return fit(`${" ".repeat(indent)}${theme.fg("accent", "✦")}${theme.fg("muted", cut + more)}`, width);
+	}
+
 	private olderLine(count: number, selected: boolean, width: number): string {
 		const theme = this.theme;
 		const line = fit(`${selected ? theme.fg("accent", "›") : " "}${theme.fg("muted", `▸ Older (${count})`)}`, width);
@@ -795,15 +853,14 @@ export class RepliesView implements Component {
 
 		const rows = this.pendingRows;
 		const height = Math.min(this.listHeight(), rows.length);
-		if (this.pendingSelected < this.pendingTop) this.pendingTop = this.pendingSelected;
-		if (this.pendingSelected >= this.pendingTop + height) this.pendingTop = this.pendingSelected - height + 1;
+		const at = this.pendingSelected;
+		// Keep the proposal under the selected ask in view with it, when there is room.
+		const last = height >= 2 && rows[at + 1]?.kind === "proposal" ? at + 1 : at;
+		if (at < this.pendingTop) this.pendingTop = at;
+		if (last >= this.pendingTop + height) this.pendingTop = last - height + 1;
 		this.pendingTop = Math.min(this.pendingTop, rows.length - height);
 		// Show the prompt above the first visible ask when the window starts right under it.
-		if (
-			this.pendingTop > 0 &&
-			rows[this.pendingTop - 1].kind === "prompt" &&
-			this.pendingSelected - this.pendingTop + 1 < height
-		) {
+		if (this.pendingTop > 0 && rows[this.pendingTop - 1].kind === "prompt" && last - this.pendingTop + 1 < height) {
 			this.pendingTop -= 1;
 		}
 		const cells = scrollCells(theme, rows.length, height, this.pendingTop);
@@ -817,7 +874,9 @@ export class RepliesView implements Component {
 						? this.askLine(row.ask, selected, content)
 						: row.kind === "member"
 							? this.memberLine(row.ask, selected, content)
-							: this.olderLine(row.count, selected, content);
+							: row.kind === "proposal"
+								? this.proposalLine(row.ask, row.member, content)
+								: this.olderLine(row.count, selected, content);
 			return this.line(text, width, cells[offset]);
 		});
 		return [top, ...visible, this.bottom(this.pendingHints(), "", width)];
@@ -916,6 +975,9 @@ export class RepliesView implements Component {
 			{ note: "✓? like <ID>: looks answered by that closed ask; it stays open until you answer it or press x.", indent: true },
 			["u", "unlink the ask from its chain"],
 			["o", "open the reply that asks it"],
+			["a", "accept the row's ✦ triage proposal"],
+			["n", "reject the row's ✦ triage proposal"],
+			{ note: "✦ comes from /replies triage: a model's proposal; nothing closes or links until you press a.", indent: true },
 			["⌫", "undo the last action"],
 			"Replies",
 			["enter", "open the reply"],
