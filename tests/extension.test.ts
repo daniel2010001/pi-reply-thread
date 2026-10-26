@@ -427,6 +427,21 @@ describe("ask mode flag", () => {
 	});
 });
 
+describe("citations by text", () => {
+	it("closes the ask a quote carries after the decision section renumbered the reply (L41)", async () => {
+		branch[1] = assistant(
+			"Should I rebase first?\n\n## Needs your decision\n\n1. Merge now?\n2. Tag it?\n3. Do I push the tag?",
+			{ id: "a1b2c3d4" },
+		);
+		// Cited as Q2, the number the push ask had when every question counted.
+		branch.push(user("> P1.R1.Q2: Do I push the tag?\nR: yes"));
+		const { commands } = load();
+		const { ctx, notices } = fakeCtx(branch);
+		await commands.get("replies")!.handler("pending", ctx);
+		expect(notices).toEqual([["P1.R1.Q1  a1b2c3d4.1  Merge now?\nP1.R1.Q2  a1b2c3d4.2  Tag it?", "info"]]);
+	});
+});
+
 describe("plain-text index", () => {
 	it("shows ⚠ only on replies with an open ask and ✓ on replies whose asks are all closed", async () => {
 		branch[1] = assistant("¿Cuál preferís?\n\n¿La subo?", { id: "a1b2c3d4" });

@@ -44,3 +44,7 @@
   once in the title. `→` expands the older ones under it, to answer, mark or dismiss one by one, and
   `←` collapses them. `l` on the row links every other ask of the group to the oldest one, so it
   becomes one chain. Nothing closes by itself.
+- A quote closes the ask whose text it carries (the open one its ID names when that one has the text,
+  else the newest), even when its ID now names another ask, as after a decision section renumbered a
+  reply; the Answered tab reads the answer from that quote. A quote without text, or with a text no
+  ask has, and an ID outside a quote close by ID as before.

@@ -702,6 +702,19 @@ describe("Answered tab", () => {
 		expect(lines[8]).toContain(fg("dim"));
 	});
 
+	it("reads the answer from a quote that closed an ask by its text, under an ID that now names another ask", () => {
+		branch.push(user("> P1.R1.Q2: Hay tres ramas viejas. ¿Las borro?\nR: sí, las tres"));
+		const view = central(branch, { tab: "replies" });
+		view.key("\t");
+		const rows = view.text(100);
+		expect(rows[0]).toMatch(/ 1 answered · 0 dismissed ─╮$/);
+		expect(rows.slice(1, 4)).toEqual([
+			expect.stringMatching(/^│ ▌P1  limpiá la rama +12:00 │$/),
+			expect.stringMatching(/^│ ›✓ P1\.R1\.Q1  Hay tres ramas viejas\. ¿Las borro\? +│$/),
+			expect.stringMatching(/^│ {4}↳ P4  sí, las tres +│$/),
+		]);
+	});
+
 	it("moves over the asks only, and Enter or o opens the reply, Esc coming back", () => {
 		const view = answered();
 		view.key("tui.select.down");

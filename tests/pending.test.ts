@@ -400,3 +400,110 @@ describe("groupLinks: linking a group to its root", () => {
 		expect(split.map((ask) => ask.ordinal)).toEqual(["P3.R1.Q1", "P5.R1.Q1"]);
 	});
 });
+
+describe("buildAsks: a quote closes the ask whose text it carries", () => {
+	/** A decision section renumbers its items: the old Q3 text is now Q4 (L41). */
+	const renumbered = () => [
+		user("go"),
+		assistant(
+			[
+				"Should I rebase first?",
+				"",
+				"## Needs your decision",
+				"",
+				"1. Do I commit T26?",
+				"2. Do I align the plain index?",
+				"3. Only top-level items?",
+				"4. Do I merge `feat/pending-central` into main?",
+			].join("\n"),
+			{ id: "a1b2c3d4" },
+		),
+	];
+	const MERGE = "Do I merge `feat/pending-central` into main?";
+	const state = (prompt: string, entries = renumbered()) => {
+		const { pending, closed } = buildAsks([...entries, user(prompt)]);
+		return {
+			open: pending.map((ask) => ask.ordinal),
+			closed: closed.map(({ ask, closedBy }) => [ask.ordinal, closedBy.kind === "answer" ? closedBy.text : closedBy.kind]),
+		};
+	};
+
+	it("closes the ask the quote carries, not the one its renumbered ID names now", () => {
+		expect(state(`> P1.R1.Q3: ${MERGE}\nR: yes, after I test it`)).toEqual({
+			open: ["P1.R1.Q1", "P1.R1.Q2", "P1.R1.Q3"],
+			closed: [["P1.R1.Q4", "yes, after I test it"]],
+		});
+		// By the unique ID, or an ID that names no ask at all.
+		expect(state(`> a1b2c3d4.3: ${MERGE}\nR: yes`).open).toEqual(["P1.R1.Q1", "P1.R1.Q2", "P1.R1.Q3"]);
+		expect(state(`> P1.R1.Q9: ${MERGE}\nR: yes`).open).toEqual(["P1.R1.Q1", "P1.R1.Q2", "P1.R1.Q3"]);
+	});
+
+	it("matches the quoted text as normalizeAsk does, whatever its case and punctuation", () => {
+		expect(state("> P1.R1.Q3: do i MERGE `feat/pending-central` into main\nR: yes").closed).toEqual([["P1.R1.Q4", "yes"]]);
+	});
+
+	it("closes the newest matching ask before the prompt, not a later one, and the one the ID names when it matches", () => {
+		const repeats = [
+			user("a"),
+			assistant("¿Los borro?", { id: "bbbbbbb1" }),
+			user("b"),
+			assistant("Listo. ¿Pusheo?\n\n¿Los borro?", { id: "bbbbbbb2" }),
+		];
+		const after = [user("c"), assistant("¿Los borro?", { id: "bbbbbbb3" })];
+		const open = (prompt: string) => buildPending([...repeats, user(prompt), ...after]).map((ask) => ask.ordinal);
+		expect(open("> P9.R9.Q9: ¿Los borro?\nR: sí")).toEqual(["P1.R1.Q1", "P2.R1.Q1", "P4.R1.Q1"]);
+		expect(open("> P2.R1.Q1: ¿Los borro?\nR: sí")).toEqual(["P1.R1.Q1", "P2.R1.Q1", "P4.R1.Q1"]);
+		// The ID names an open ask with that text, so it closes that one: what answering a repeat from the central pastes.
+		expect(open("> P1.R1.Q1: ¿Los borro?\nR: sí")).toEqual(["P2.R1.Q1", "P2.R1.Q2", "P4.R1.Q1"]);
+	});
+
+	it("falls back to the ID when nothing follows the colon, or the text matches no ask", () => {
+		expect(state("> P1.R1.Q3:\nR: yes")).toEqual({
+			open: ["P1.R1.Q1", "P1.R1.Q2", "P1.R1.Q4"],
+			closed: [["P1.R1.Q3", "yes"]],
+		});
+		expect(state("> P1.R1.Q3: Something I wrote myself?\nR: no").closed).toEqual([["P1.R1.Q3", "no"]]);
+	});
+
+	it("does not fall back to the ID when the text matches an ask that is already closed", () => {
+		const answered = [...renumbered(), user(`> P1.R1.Q4: ${MERGE}\nR: yes`)];
+		expect(state(`> P1.R1.Q3: ${MERGE}\nR: yes again`, answered)).toEqual({
+			open: ["P1.R1.Q1", "P1.R1.Q2", "P1.R1.Q3"],
+			closed: [["P1.R1.Q4", "yes"]],
+		});
+	});
+
+	it("closes by text in both paste formats and reads each answer from its own quote", () => {
+		const lines = `> P1.R1.Q3: ${MERGE}\nR: later\n\n> P1.R1.Q2: Only top-level items?\nR: yes`;
+		expect(state(lines)).toEqual({
+			open: ["P1.R1.Q1", "P1.R1.Q2"],
+			closed: [
+				["P1.R1.Q3", "yes"],
+				["P1.R1.Q4", "later"],
+			],
+		});
+		const inline = `> P1.R1.Q3: ${MERGE} → later\n> P1.R1.Q2: Only top-level items? → \n> P1.R1.Q1: Do I align the plain index? → no → never`;
+		expect(state(inline)).toEqual({
+			open: ["P1.R1.Q1"],
+			closed: [
+				["P1.R1.Q2", "no → never"],
+				["P1.R1.Q3", ""],
+				["P1.R1.Q4", "later"],
+			],
+		});
+	});
+
+	it("keeps an ask whose own text holds → whole", () => {
+		const entries = [user("go"), assistant("¿Paso de A → B?", { id: "a1b2c3d4" }), user("x"), assistant("¿Otra?")];
+		expect(state("> P9.R9.Q9: ¿Paso de A → B? → sí", entries)).toEqual({ open: ["P2.R1.Q1"], closed: [["P1.R1.Q1", "sí"]] });
+	});
+
+	it("still closes by ID a mention outside a quote, and an ID the quote does not carry", () => {
+		expect(state("P1.R1.Q3 yes").closed).toEqual([["P1.R1.Q3", "P1.R1.Q3 yes"]]);
+		expect(state(`> P1.R1.Q3: ${MERGE}\nR: yes\n\nAnd P1.R1.Q3: no.`).closed).toEqual([
+			// A citation outside a quote answers with the prompt's first line, as before.
+			["P1.R1.Q3", `> P1.R1.Q3: ${MERGE}`],
+			["P1.R1.Q4", "yes"],
+		]);
+	});
+});

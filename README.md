@@ -228,9 +228,17 @@ The format is stored as a `reply-thread.format` custom entry on the branch; the 
 
 An ask closes only explicitly:
 
-- **Answered**: a later prompt of yours cites its ordered or unique ID, which is what the pasted quote
-  does. Gentle Agents wake messages do not count.
+- **Answered**: a later prompt of yours quotes it or cites its ordered or unique ID, which is what the
+  pasted quote does. Gentle Agents wake messages do not count.
 - **Dismissed** with `x`.
+
+A quote line, `> <ID>: <text>`, closes the ask whose text it carries: the open ask with the same text
+(compared as for [repeated asks](#repeated-asks), case and punctuation aside), the one the ID names
+when it has that text, else the newest one before your prompt. So a quote still closes the right ask
+when its ID has changed since you copied it, for example after a reply was renumbered by its decision
+section. In the `same line` format the text ends at the `→` before your answer. A quote with nothing
+after the colon, or with a text no ask has, closes the ask its ID names; an ID outside a quote does
+too.
 
 ### Repeated asks
 
@@ -285,9 +293,9 @@ move and `Enter` or `o` opens the reply.
 ╰─ ↑↓ move · enter open · esc close ───────────────────────────────────────────────────────╯
 ```
 
-The answer is read from the prompt that cites the ask: the `R:` line under the quote, the text after
-`→` on the quote line, or the first line after the quote that is not a quote. A prompt that cites the
-ID without a quote, or has nothing after it, answers with its first line.
+The answer is read from the quote that closed the ask: the `R:` line under it, the text after `→` on
+the quote line, or the first line after it that is not a quote. A prompt that cites the ID without a
+quote, or has nothing after the quote, answers with its first line.
 
 ### Widget
 

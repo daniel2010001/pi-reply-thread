@@ -112,23 +112,59 @@ function firstLine(text: string): string {
 	);
 }
 
+/** The answer to the quote on trimmed line `at`: the `R:` line under it, the text after its `arrow`, or the next plain line. */
+function answerAt(prompt: string, lines: readonly string[], at: number, arrow: number): string {
+	const under = lines[at + 1];
+	if (under?.startsWith("R:")) return under.slice(2).trim();
+	if (arrow >= 0) return lines[at].slice(arrow + 1).trim();
+	return lines.slice(at + 1).find((line) => line && !line.startsWith(">")) ?? firstLine(prompt);
+}
+
 /**
  * What a prompt answers to an ask it cites, trimmed: the `R:` line right under the cited quote, the text
  * after `→` on the quote line, or the first line after the quote that is neither a quote nor empty.
  * A prompt that cites the ask outside a quote, or has nothing after the quote, answers its first line.
+ * Lines in `skip` (a quote that closed an ask by its text) do not count as citing it.
  */
-export function answerOf(prompt: string, ask: Ask): string {
+export function answerOf(prompt: string, ask: Ask, skip: ReadonlySet<number> = new Set()): string {
 	const lines = prompt.split("\n").map((line) => line.trim());
-	const at = lines.findIndex((line) => cites(line, ask));
+	const at = lines.findIndex((line, index) => !skip.has(index) && cites(line, ask));
 	const quote = lines[at];
 	if (!quote?.startsWith(">")) return firstLine(prompt);
-	const under = lines[at + 1];
-	if (under?.startsWith("R:")) return under.slice(2).trim();
 	// The ask itself may hold a `→`, so take the one right after its text when the quote keeps it.
 	const known = quote.indexOf(`${ask.text} →`);
-	const arrow = known >= 0 ? known + ask.text.length + 1 : quote.indexOf("→");
-	if (arrow >= 0) return quote.slice(arrow + 1).trim();
-	return lines.slice(at + 1).find((line) => line && !line.startsWith(">")) ?? firstLine(prompt);
+	return answerAt(prompt, lines, at, known >= 0 ? known + ask.text.length + 1 : quote.indexOf("→"));
+}
+
+/** `> <ordered or unique ID>: <text>`, the quote the central pastes; the text starts at `start`. */
+const QUOTE = /^>\s*(P\d+\.R\d+\.Q\d+|[0-9a-f]{8}\.\d+)\s*:\s*/i;
+
+/**
+ * The ask a trimmed quote line carries by its text, and where its answer's `→` is: the text up to a
+ * `→` (the last one first) or the whole text, compared with `normalizeAsk`. Among the asks with that
+ * text, the open one the quote's ID names, else the newest open one; `ask` is undefined when all of
+ * them are closed. Undefined when the line is no quote or its text matches no ask.
+ */
+function quotedAsk(
+	line: string,
+	asks: readonly Ask[],
+	isOpen: (ask: Ask) => boolean,
+): { ask?: Ask; arrow: number } | undefined {
+	const quote = QUOTE.exec(line);
+	if (!quote) return undefined;
+	const start = quote[0].length;
+	const arrows = [...line.slice(start).matchAll(/→/g)].map((match) => start + (match.index as number)).reverse();
+	for (const arrow of [...arrows, -1]) {
+		const text = normalizeAsk(arrow >= 0 ? line.slice(start, arrow) : line.slice(start));
+		if (!text) continue;
+		const same = asks.filter((ask) => normalizeAsk(ask.text) === text);
+		if (!same.length) continue;
+		const open = same.filter(isOpen);
+		const id = quote[1].toLowerCase();
+		const named = open.find((ask) => ask.ordinal.toLowerCase() === id || ask.id === id);
+		return { ask: named ?? open.at(-1), arrow };
+	}
+	return undefined;
 }
 
 function isAction(data: unknown): data is AskAction {
@@ -140,7 +176,7 @@ function isAction(data: unknown): data is AskAction {
 
 /**
  * The open asks of a branch, one row per chain, oldest first. Rebuilt in branch order: a later prompt
- * that cites an ask answers it, `reply-thread.ask` entries dismiss, reopen, link and unlink, later wins.
+ * that quotes an ask's text, or cites its ID, answers it, `reply-thread.ask` entries dismiss, reopen, link and unlink, later wins.
  * Answering or dismissing any member of a chain closes the whole chain.
  */
 export function buildPending(entries: readonly SessionEntry[], threads = buildThreads(entries)): PendingAsk[] {
@@ -174,9 +210,25 @@ export function buildAsks(entries: readonly SessionEntry[], threads = buildThrea
 		}
 		const thread = prompts.get(entry.id);
 		if (thread) {
+			const prompt = thread.promptText;
+			const lines = prompt.split("\n").map((line) => line.trim());
+			// A quote closes the ask whose text it carries, even when its ID now names another ask; the
+			// ID rule then skips that line.
+			const byText = new Set<number>();
+			const known = [...asks.values()];
+			for (const [index, line] of lines.entries()) {
+				const found = quotedAsk(line, known, (ask) => !closed.has(ask.id));
+				if (!found) continue;
+				byText.add(index);
+				if (found.ask) {
+					const text = answerAt(prompt, lines, index, found.arrow);
+					closed.set(found.ask.id, { by: { kind: "answer", prompt: thread, text }, at });
+				}
+			}
+			const rest = lines.filter((_, index) => !byText.has(index)).join("\n");
 			for (const ask of asks.values()) {
-				if (!closed.has(ask.id) && cites(thread.promptText, ask)) {
-					closed.set(ask.id, { by: { kind: "answer", prompt: thread, text: answerOf(thread.promptText, ask) }, at });
+				if (!closed.has(ask.id) && cites(rest, ask)) {
+					closed.set(ask.id, { by: { kind: "answer", prompt: thread, text: answerOf(prompt, ask, byText) }, at });
 				}
 			}
 			continue;
