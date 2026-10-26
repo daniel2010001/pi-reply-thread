@@ -285,12 +285,14 @@ mark (`●`) and dismiss like any ask. `←` collapses it again.
 
 **A group row answers only its newest ask.** A group is a display fold, never a link: it only tells
 you the asks look alike, and closing an ask stays explicit. So answering or dismissing the row closes
-its newest ask, and the next newest takes the row. To close the whole group at once, use one of two
-ways:
+its newest ask, and the next newest takes the row. To close the whole group at once, use one of
+these ways:
 
 - **`l`, then answer**: press `l` on the row (or one of its expanded asks) to link the group: every
   other ask continues the oldest one and the row becomes a chain, which closes as a whole.
 - **`→`, then answer each**: expand the row and answer or dismiss its asks one by one.
+- **`a` twice on a `✦` proposal**: after a [triage](#triage-optional-uses-your-session-model), the
+  first `a` on the row expands the group and the second closes all of it with the proposed answer.
 
 The `?` card says the same under the group keys. To link asks that do not look alike, mark 2 or more
 with `Space` and press `l`: each one continues the next older one, and the marks clear.
