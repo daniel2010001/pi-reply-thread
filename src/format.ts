@@ -1,5 +1,5 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import type { QuestionId } from "./pending.ts";
+import { openIds, type QuestionId, questionIds } from "./pending.ts";
 import type { Reply, Thread, Trigger } from "./threads.ts";
 
 /** One line of the reply index: a thread header, or a reply that can be opened. */
@@ -75,15 +75,23 @@ export function formatReplyPlain(reply: Reply): string {
 }
 
 /**
- * Widget lines: the latest thread while it has 2 or more replies, and one line for the open asks
- * (oldest first, a chain counted once). Undefined when there is nothing to show.
+ * Widget lines: the latest thread while it has 2 or more replies, `⚠` on each reply with an ask still
+ * open, and one line for the open asks (oldest first, a chain counted once). Undefined when there is
+ * nothing to show.
  */
-export function widgetLines(threads: readonly Thread[], pending: readonly QuestionId[] = []): string[] | undefined {
+export function widgetLines(
+	threads: readonly Thread[],
+	pending: readonly (QuestionId & { chain?: readonly QuestionId[] })[] = [],
+): string[] | undefined {
 	const lines: string[] = [];
 	const thread = threads.at(-1);
+	const open = openIds(pending);
 	if (thread && thread.replies.length >= 2) {
 		const summary = thread.replies
-			.map((reply) => `R${reply.index} ${triggerText(reply.triggers)}${reply.openAsks.length ? " ⚠" : ""}`)
+			.map((reply) => {
+				const waits = questionIds(reply).some((ask) => open.has(ask.id));
+				return `R${reply.index} ${triggerText(reply.triggers)}${waits ? " ⚠" : ""}`;
+			})
 			.join(" · ");
 		lines.push(`P${thread.prompt} · ${thread.replies.length} replies: ${summary} · alt+r`);
 	}

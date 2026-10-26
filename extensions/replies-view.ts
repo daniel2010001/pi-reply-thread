@@ -11,7 +11,7 @@ import {
 	promptLine,
 	triggerText,
 } from "../src/format.ts";
-import type { Ask, AskAction, PendingAsk } from "../src/pending.ts";
+import { type Ask, type AskAction, type AskState, type ClosedAsk, type PendingAsk, questionIds } from "../src/pending.ts";
 import type { Reply, Thread, Trigger, TriggerKind } from "../src/threads.ts";
 
 /** Pi cuts an overlay taller than its `maxHeight`, so the view sizes itself to the same cap. */
@@ -45,8 +45,10 @@ export type Tab = "pending" | "replies";
 /** The pending central: the open asks, and how to dismiss or link them on the branch. */
 export interface Central {
 	pending: readonly PendingAsk[];
-	/** Writes the action to the branch and returns the open asks rebuilt from it. */
-	act(action: AskAction): readonly PendingAsk[];
+	/** The closed asks, so the replies and the viewer mark only the open ones. */
+	closed: readonly ClosedAsk[];
+	/** Writes the action to the branch and returns the asks rebuilt from it. */
+	act(action: AskAction): AskState;
 	/** The tab to open on; Pending when any ask is open, else Replies. */
 	tab?: Tab;
 	/** How answers are pasted when the central opens. */
@@ -57,6 +59,33 @@ export interface Central {
 
 /** One line of the Pending tab: a prompt header, an open ask, or the folded older prompts. */
 type PendingRow = { kind: "prompt"; thread: Thread } | { kind: "ask"; ask: PendingAsk } | { kind: "older"; count: number };
+
+/** The asks of a reply still open, and the closed ones with how they closed (`→ P13` or `dismissed`). */
+interface AskStatus {
+	open: string[];
+	closed: { text: string; how: string }[];
+}
+
+/** What one list of the viewer header shows: its title, the first asks, and how many it leaves out. */
+interface HeaderList {
+	title: boolean;
+	shown: number;
+	hidden: number;
+}
+
+const NO_LIST: HeaderList = { title: false, shown: 0, hidden: 0 };
+
+/** A list of `count` asks in `room` rows: all of them, the first ones and a "more" line, or its title with the count. */
+function headerList(count: number, room: number): HeaderList {
+	if (!count || room < 1) return NO_LIST;
+	if (count + 1 <= room) return { title: true, shown: count, hidden: 0 };
+	if (room >= 3) return { title: true, shown: room - 2, hidden: count - room + 2 };
+	return { title: true, shown: 0, hidden: count };
+}
+
+function headerListRows(list: HeaderList): number {
+	return list.title ? 1 + list.shown + (list.shown && list.hidden ? 1 : 0) : 0;
+}
 
 function plural(count: number, one: string, many: string): string {
 	return `${count} ${count === 1 ? one : many}`;
@@ -107,6 +136,9 @@ export class RepliesView implements Component {
 	private readonly central: Central | undefined;
 	private tab: Tab;
 	private pending: readonly PendingAsk[] = [];
+	private closed: readonly ClosedAsk[] = [];
+	/** The closed row of each closed ask, chain members included. */
+	private readonly closings = new Map<string, ClosedAsk>();
 	private pendingRows: PendingRow[] = [];
 	private pendingSelected = 0;
 	private pendingTop = 0;
@@ -132,7 +164,7 @@ export class RepliesView implements Component {
 		this.tab = central ? (central.tab ?? (central.pending.length ? "pending" : "replies")) : "replies";
 		if (central) {
 			this.format = central.format;
-			this.setPending(central.pending);
+			this.setAsks(central);
 		}
 		this.rows = indexRows(threads);
 		const replies = this.rows.flatMap((row) => (row.reply ? [row.reply] : []));
@@ -225,6 +257,28 @@ export class RepliesView implements Component {
 
 	// ── Pending ──────────────────────────────────────────────────────────────
 
+	/** Takes the open and closed asks rebuilt from the branch. */
+	private setAsks(state: { pending: readonly PendingAsk[]; closed: readonly ClosedAsk[] }): void {
+		this.closed = state.closed;
+		this.closings.clear();
+		for (const row of state.closed) for (const ask of [...row.chain, row.ask]) this.closings.set(ask.id, row);
+		this.setPending(state.pending);
+	}
+
+	/** The asks of a reply still open and the closed ones; all open without a central. */
+	private askStatus(reply: Reply): AskStatus {
+		const status: AskStatus = { open: [], closed: [] };
+		for (const ask of questionIds(reply)) {
+			const row = this.closings.get(ask.id);
+			if (!row) status.open.push(ask.text);
+			else {
+				const how = row.closedBy.kind === "answer" ? `→ P${row.closedBy.prompt.prompt}` : "dismissed";
+				status.closed.push({ text: ask.text, how });
+			}
+		}
+		return status;
+	}
+
 	/** Takes the open asks and rebuilds the rows: prompts newest first, the older ones folded. */
 	private setPending(pending: readonly PendingAsk[]): void {
 		this.pending = pending;
@@ -293,9 +347,9 @@ export class RepliesView implements Component {
 
 	private act(actions: AskAction[]): void {
 		const central = this.central as Central;
-		let pending = this.pending;
-		for (const action of actions) pending = central.act(action);
-		this.setPending(pending);
+		let state: AskState | undefined;
+		for (const action of actions) state = central.act(action);
+		if (state) this.setAsks(state);
 	}
 
 	/** Keys of the Pending tab; false when the key means nothing there. */
@@ -425,7 +479,8 @@ export class RepliesView implements Component {
 		const last = reply.index === row.thread.replies.length;
 		const ordinal = reply.ordinal.padEnd(this.ordinalWidth);
 		const trigger = fit(this.triggers(reply.triggers), this.triggerWidth);
-		const ask = reply.openAsks[0];
+		const status = this.askStatus(reply);
+		const ask = status.open[0];
 		const content = [
 			selected ? theme.fg("accent", "›") : " ",
 			theme.fg("borderMuted", last ? "└" : "├"),
@@ -435,7 +490,11 @@ export class RepliesView implements Component {
 			theme.fg("dim", reply.entryId),
 			"  ",
 			trigger,
-			ask ? `  ${theme.fg("warning", "⚠")} ${theme.fg("muted", ask)}` : "",
+			ask
+				? `  ${theme.fg("warning", "⚠")} ${theme.fg("muted", ask)}`
+				: status.closed.length
+					? `  ${theme.fg("success", "✓")}`
+					: "",
 		].join("");
 		const line = fit(content, width);
 		return selected ? theme.bg("selectedBg", line) : line;
@@ -576,24 +635,30 @@ export class RepliesView implements Component {
 
 	/**
 	 * What fits above the reply while it keeps MIN_BODY rows: the thread's prompt, then the open asks,
-	 * cut to the first ones and a "more" line, or to a title with their count, when the screen is short.
+	 * then the closed ones, each cut to the first ones and a "more" line, or to a title with their count,
+	 * when the screen is short.
 	 */
-	private headerPlan(): { prompt: boolean; title: boolean; shown: number; hidden: number } {
-		const asks = this.reply?.openAsks.length ?? 0;
+	private headerPlan(status: AskStatus): { prompt: boolean; open: HeaderList; closed: HeaderList } {
 		const room = this.available() - 3 - MIN_BODY;
-		if (room < 1) return { prompt: false, title: false, shown: 0, hidden: 0 };
-		const list = room - 2;
-		if (!asks || list < 0) return { prompt: true, title: false, shown: 0, hidden: 0 };
-		if (asks <= list) return { prompt: true, title: true, shown: asks, hidden: 0 };
-		if (list >= 2) return { prompt: true, title: true, shown: list - 1, hidden: asks - list + 1 };
-		return { prompt: true, title: true, shown: 0, hidden: asks };
+		if (room < 1) return { prompt: false, open: NO_LIST, closed: NO_LIST };
+		const open = headerList(status.open.length, room - 1);
+		const closed = headerList(status.closed.length, room - 1 - headerListRows(open));
+		return { prompt: true, open, closed };
+	}
+
+	/** `  • <ask>  → P13` or `  • <ask>  dismissed`; the ask is cut first. */
+	private closedLine(ask: { text: string; how: string }, width: number): string {
+		const theme = this.theme;
+		const how = `  ${ask.how}`;
+		const text = truncateToWidth(ask.text, Math.max(0, width - 4 - visibleWidth(how)), "…");
+		return theme.fg("muted", `  • ${text}${how}`);
 	}
 
 	/** Content rows above the separator, following `headerPlan`. */
 	private viewerHeader(width: number): string[] {
 		const theme = this.theme;
-		const reply = this.reply as Reply;
-		const plan = this.headerPlan();
+		const status = this.askStatus(this.reply as Reply);
+		const plan = this.headerPlan(status);
 		const lines: string[] = [];
 		if (plan.prompt) {
 			const prompt = this.thread ? promptLine(this.thread) : "";
@@ -601,21 +666,28 @@ export class RepliesView implements Component {
 				theme.bg("userMessageBg", fit(`${theme.fg("accent", "▌")} ${theme.fg("userMessageText", prompt)}`, width)),
 			);
 		}
-		if (plan.title) {
-			const count = plan.shown ? "" : ` (${plan.hidden})`;
+		const { open, closed } = plan;
+		if (open.title) {
+			const count = open.shown ? "" : ` (${open.hidden})`;
 			lines.push(theme.fg("warning", theme.bold(`⚠ Waits on you${count}`)));
-			for (const ask of reply.openAsks.slice(0, plan.shown)) {
+			for (const ask of status.open.slice(0, open.shown)) {
 				lines.push(`  ${theme.fg("mdListBullet", "•")} ${theme.fg("text", ask)}`);
 			}
-			if (plan.shown && plan.hidden) lines.push(theme.fg("muted", `  … ${plan.hidden} more in the reply`));
+			if (open.shown && open.hidden) lines.push(theme.fg("muted", `  … ${open.hidden} more in the reply`));
+		}
+		if (closed.title) {
+			const count = closed.shown ? "" : ` (${closed.hidden})`;
+			lines.push(theme.fg("muted", theme.bold(`✓ Answered${count}`)));
+			for (const ask of status.closed.slice(0, closed.shown)) lines.push(this.closedLine(ask, width));
+			if (closed.shown && closed.hidden) lines.push(theme.fg("muted", `  … ${closed.hidden} more in the reply`));
 		}
 		return lines;
 	}
 
 	/** Body rows of the viewer: the screen minus both borders and, when there is a header, it and its separator. */
 	private viewerHeight(): number {
-		const plan = this.headerPlan();
-		const header = (plan.prompt ? 1 : 0) + (plan.title ? 1 + plan.shown + (plan.shown && plan.hidden ? 1 : 0) : 0);
+		const plan = this.headerPlan(this.askStatus(this.reply as Reply));
+		const header = (plan.prompt ? 1 : 0) + headerListRows(plan.open) + headerListRows(plan.closed);
 		return Math.max(1, this.available() - 2 - (header ? header + 1 : 0));
 	}
 

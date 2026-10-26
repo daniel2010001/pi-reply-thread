@@ -161,6 +161,22 @@ describe("widgetLines", () => {
 		]);
 	});
 
+	it("marks ⚠ only on replies with an ask still open, a chain member counting while its chain is open", () => {
+		const waiting: Thread = {
+			...p12,
+			replies: [p12.replies[0], { ...p12.replies[1], openAsks: ["Needs your decision: merge?"] }, p12.replies[2]],
+		};
+		expect(widgetLines([p11, waiting], asks.slice(2))).toEqual([
+			"P12 · 3 replies: R1 prompt · R2 job: tests ⚠ · R3 worker: docs · alt+r",
+			"⚠ 1 pending · newest: P12.R2.Q1 Needs your decision: merge? · alt+r",
+		]);
+		const chained = [{ ...asks[2], chain: [asks[1]] }];
+		expect(widgetLines([p11, waiting], chained)?.[0]).toBe(
+			"P12 · 3 replies: R1 prompt ⚠ · R2 job: tests ⚠ · R3 worker: docs · alt+r",
+		);
+		expect(widgetLines([p11, waiting])).toEqual(["P12 · 3 replies: R1 prompt · R2 job: tests · R3 worker: docs · alt+r"]);
+	});
+
 	it("shows the pending line alone while the latest thread has fewer than 2 replies", () => {
 		expect(widgetLines([p12, p11], asks.slice(0, 1))).toEqual(["⚠ 1 pending · newest: P12.R1.Q1 ¿Cuál preferís? · alt+r"]);
 	});

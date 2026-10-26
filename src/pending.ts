@@ -35,12 +35,34 @@ export interface PendingAsk extends Ask {
 	suggestion?: Ask;
 }
 
+/** How a closed ask closed: a later prompt cited it, or the central dismissed it. */
+export type ClosedBy = { kind: "answer"; prompt: Thread } | { kind: "dismiss" };
+
+/** One closed row: an ask alone, or the newest member of a chain, with how the chain closed. */
+export interface ClosedAsk {
+	ask: Ask;
+	/** Older members of its chain, oldest first; empty for an ask without links. */
+	chain: Ask[];
+	closedBy: ClosedBy;
+}
+
+/** The asks of a branch: the open rows of the central and the closed ones. */
+export interface AskState {
+	pending: PendingAsk[];
+	closed: ClosedAsk[];
+}
+
 export function questionIds(reply: Reply): QuestionId[] {
 	return reply.openAsks.map((text, index) => ({
 		ordinal: `${reply.ordinal}.Q${index + 1}`,
 		id: `${reply.entryId}.${index + 1}`,
 		text,
 	}));
+}
+
+/** Unique IDs of the asks still open: each row and the older members of its chain. */
+export function openIds(pending: readonly (QuestionId & { chain?: readonly QuestionId[] })[]): Set<string> {
+	return new Set(pending.flatMap((row) => [row.id, ...(row.chain ?? []).map((member) => member.id)]));
 }
 
 /** Lowercase, without inline code and punctuation, spaces collapsed: the text two repeats share. */
@@ -94,6 +116,15 @@ function isAction(data: unknown): data is AskAction {
  * Answering or dismissing any member of a chain closes the whole chain.
  */
 export function buildPending(entries: readonly SessionEntry[], threads = buildThreads(entries)): PendingAsk[] {
+	return buildAsks(entries, threads).pending;
+}
+
+/**
+ * The open asks of a branch as `buildPending` builds them, and the closed ones, one row per chain,
+ * oldest first. A closed chain keeps how its first member closed: the first prompt that cited it, or
+ * the dismiss.
+ */
+export function buildAsks(entries: readonly SessionEntry[], threads = buildThreads(entries)): AskState {
 	const replies = new Map<string, { reply: Reply; thread: Thread }>();
 	const prompts = new Map<string, Thread>();
 	for (const thread of threads) {
@@ -102,11 +133,12 @@ export function buildPending(entries: readonly SessionEntry[], threads = buildTh
 	}
 
 	const asks = new Map<string, Ask>();
-	const closed = new Set<string>();
+	/** How each closed ask closed, and when, in branch order. */
+	const closed = new Map<string, { by: ClosedBy; at: number }>();
 	/** The older ask each ask continues. */
 	const continues = new Map<string, string>();
 
-	for (const entry of entries) {
+	for (const [at, entry] of entries.entries()) {
 		const found = replies.get(entry.id);
 		if (found) {
 			for (const id of questionIds(found.reply)) asks.set(id.id, { ...id, ...found, seq: asks.size });
@@ -114,15 +146,18 @@ export function buildPending(entries: readonly SessionEntry[], threads = buildTh
 		}
 		const thread = prompts.get(entry.id);
 		if (thread) {
-			for (const ask of asks.values()) if (cites(thread.promptText, ask)) closed.add(ask.id);
+			for (const ask of asks.values()) {
+				if (!closed.has(ask.id) && cites(thread.promptText, ask)) closed.set(ask.id, { by: { kind: "answer", prompt: thread }, at });
+			}
 			continue;
 		}
 		if (entry.type !== "custom" || entry.customType !== ASK_ENTRY || !isAction(entry.data)) continue;
 		const action = entry.data;
 		const ask = asks.get(action.ask);
 		if (!ask) continue;
-		if (action.action === "dismiss") closed.add(ask.id);
-		else if (action.action === "reopen") closed.delete(ask.id);
+		if (action.action === "dismiss") {
+			if (!closed.has(ask.id)) closed.set(ask.id, { by: { kind: "dismiss" }, at });
+		} else if (action.action === "reopen") closed.delete(ask.id);
 		else if (action.action === "unlink") {
 			if (continues.get(ask.id) === action.continues) continues.delete(ask.id);
 		} else if (action.action === "link") {
@@ -144,17 +179,20 @@ export function buildPending(entries: readonly SessionEntry[], threads = buildTh
 	}
 
 	const rows: PendingAsk[] = [];
+	const done: ClosedAsk[] = [];
 	for (const members of chains.values()) {
-		if (members.some((member) => closed.has(member.id))) continue;
 		const newest = members.at(-1) as Ask;
-		rows.push({ ...newest, chain: members.slice(0, -1), continues: continues.get(newest.id) });
+		const closings = members.flatMap((member) => closed.get(member.id) ?? []).sort((a, b) => a.at - b.at);
+		if (closings.length) done.push({ ask: newest, chain: members.slice(0, -1), closedBy: closings[0].by });
+		else rows.push({ ...newest, chain: members.slice(0, -1), continues: continues.get(newest.id) });
 	}
 	rows.sort((a, b) => a.seq - b.seq);
+	done.sort((a, b) => a.ask.seq - b.ask.seq);
 
 	const openAsks = rows.flatMap((row) => [...row.chain, row]).sort((a, b) => a.seq - b.seq);
 	for (const row of rows) {
 		if (row.chain.length) continue;
 		row.suggestion = openAsks.findLast((other) => other.seq < row.seq && similarAsks(other.text, row.text));
 	}
-	return rows;
+	return { pending: rows, closed: done };
 }

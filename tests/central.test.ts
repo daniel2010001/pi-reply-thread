@@ -12,7 +12,7 @@ import { stripTerminalSequences, type TUI, visibleWidth } from "@earendil-works/
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { RepliesView } from "../extensions/replies-view.ts";
 import type { AnswerFormat } from "../src/format.ts";
-import { type AskAction, buildPending } from "../src/pending.ts";
+import { type AskAction, buildAsks } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
 import { askEntry, assistant, resetIds, user } from "./helpers.ts";
 
@@ -55,7 +55,7 @@ function central(
 	const act = (action: AskAction) => {
 		actions.push(action);
 		entries.push(askEntry(action as unknown as Record<string, string>));
-		return buildPending(entries);
+		return buildAsks(entries);
 	};
 	const component = new RepliesView(
 		tui,
@@ -65,7 +65,7 @@ function central(
 		(paste?: string) => (closed = { paste }),
 		undefined,
 		{
-			pending: buildPending(entries),
+			...buildAsks(entries),
 			act,
 			tab: options.tab,
 			format: options.format ?? "lines",
@@ -384,5 +384,99 @@ describe("Pending on any screen", () => {
 				}
 			}
 		}
+	});
+});
+
+describe("Replies tab follows the open asks", () => {
+	it("shows ✓ and no ask text for a reply whose asks are all closed, ⚠ with the first open one otherwise", () => {
+		branch.push(askEntry({ action: "dismiss", ask: "c9d0e1f2.1" }), user("> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nR: sí"));
+		const view = central(branch, { tab: "replies" });
+		const rows = view.text(100);
+		expect(rows).toContainEqual(expect.stringMatching(/^│ .└ P3\.R1  c9d0e1f2  prompt +✓ +│$/));
+		expect(rows).toContainEqual(expect.stringMatching(/^│ .└ P1\.R1  a1b2c3d4  prompt +⚠ Necesito tu OK para pushear\. +│$/));
+		const done = view.lines(100).find((line) => line.includes("c9d0e1f2")) as string;
+		expect(done).toContain(`${fg("success")}✓`);
+		expect(done).not.toContain(fg("warning"));
+	});
+
+	it("counts a chain member as open while its chain is, and closes them together", () => {
+		branch.push(
+			askEntry({ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" }),
+			askEntry({ action: "dismiss", ask: "a1b2c3d4.2" }),
+		);
+		const open = central(branch, { tab: "replies" }).text(100);
+		expect(open).toContainEqual(expect.stringMatching(/P1\.R1  a1b2c3d4  prompt +⚠ Hay tres ramas viejas\. ¿Las borro\? +│$/));
+		branch.push(user("> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: no"));
+		const closed = central(branch, { tab: "replies" }).text(100);
+		expect(closed).toContainEqual(expect.stringMatching(/P1\.R1  a1b2c3d4  prompt +✓ +│$/));
+		expect(closed).toContainEqual(expect.stringMatching(/P3\.R1  c9d0e1f2  prompt +✓ +│$/));
+	});
+
+	it("follows a dismiss made in the Pending tab", () => {
+		const view = central(branch);
+		view.keys("x", "\t");
+		expect(view.text(100)).toContainEqual(expect.stringMatching(/P3\.R1  c9d0e1f2  prompt +✓ +│$/));
+	});
+});
+
+describe("viewer header follows the open asks", () => {
+	const reader = (entries: SessionEntry[]) => {
+		const view = central(entries, { tab: "replies" });
+		const index = view.text(100).findIndex((line) => line.includes("a1b2c3d4"));
+		const steps = view.text(100).slice(0, index).filter((line) => /[├└] P/.test(line)).length;
+		for (let step = 0; step < steps; step += 1) view.key("tui.select.down");
+		view.key("tui.select.confirm");
+		return view;
+	};
+
+	it("lists only the open asks under ⚠ Waits on you and the closed ones under ✓ Answered", () => {
+		branch.push(user("> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nR: sí"));
+		const view = reader(branch);
+		const rows = view.text(100);
+		expect(rows[0]).toMatch(/^╭─ P1\.R1 /);
+		expect(rows.slice(2, 6)).toEqual([
+			expect.stringMatching(/^│ ⚠ Waits on you +│$/),
+			expect.stringMatching(/^│ {3}• Necesito tu OK para pushear\. +│$/),
+			expect.stringMatching(/^│ ✓ Answered +│$/),
+			expect.stringMatching(/^│ {3}• Hay tres ramas viejas\. ¿Las borro\?  → P4 +│$/),
+		]);
+		expect(rows[6]).toMatch(/^├─+┤$/);
+		expect(view.lines(100)[4]).toContain(fg("muted"));
+	});
+
+	it("shows dismissed asks as dismissed and leaves out ⚠ when every ask is closed", () => {
+		branch.push(
+			askEntry({ action: "dismiss", ask: "a1b2c3d4.2" }),
+			user("> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nR: sí"),
+		);
+		const rows = reader(branch).text(100);
+		expect(rows.some((line) => line.includes("Waits on you"))).toBe(false);
+		expect(rows.slice(2, 5)).toEqual([
+			expect.stringMatching(/^│ ✓ Answered +│$/),
+			expect.stringMatching(/^│ {3}• Hay tres ramas viejas\. ¿Las borro\?  → P4 +│$/),
+			expect.stringMatching(/^│ {3}• Necesito tu OK para pushear\.  dismissed +│$/),
+		]);
+	});
+
+	it("caps both lists on a short screen and keeps the frame inside the overlay cap", () => {
+		resetIds();
+		const asks = Array.from({ length: 6 }, (_, index) => `¿Pregunta ${index + 1}?`);
+		const body = Array.from({ length: 40 }, (_, index) => `Line ${index + 1}`);
+		const entries = [user("dame"), assistant([...asks, ...body].join("\n\n"), { id: "a1b2c3d4" })];
+		entries.push(...[1, 2, 3].map((n) => askEntry({ action: "dismiss", ask: `a1b2c3d4.${n}` })));
+		for (const rows of [8, 12, 14, 24]) {
+			const cap = Math.min(rows - 4, Math.floor(rows * 0.9));
+			const view = central([...entries], { rows, tab: "replies" });
+			view.keys("tui.select.confirm");
+			const shown = view.text(60);
+			expect(shown.length).toBeLessThanOrEqual(cap);
+			expect(shown.every((line) => visibleWidth(line) === 60)).toBe(true);
+			expect(shown.at(-1)).toMatch(/^╰─/);
+		}
+		const roomy = central([...entries], { rows: 30, tab: "replies" });
+		roomy.keys("tui.select.confirm");
+		const text = roomy.text(60);
+		expect(text.filter((line) => line.includes("dismissed"))).toHaveLength(3);
+		expect(text.filter((line) => /• ¿Pregunta [456]\?/.test(line))).toHaveLength(3);
 	});
 });

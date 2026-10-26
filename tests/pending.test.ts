@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { answerText } from "../src/format.ts";
-import { buildPending, normalizeAsk, questionIds, similarAsks } from "../src/pending.ts";
+import { buildAsks, buildPending, normalizeAsk, questionIds, similarAsks } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
 import { askEntry, assistant, resetIds, user, wake } from "./helpers.ts";
 
@@ -203,5 +203,49 @@ describe("buildPending: repeat suggestions", () => {
 	it("normalizes: lowercase, inline code and punctuation removed, spaces collapsed", () => {
 		expect(normalizeAsk("  ¿Corro `pnpm test`   AHORA, sí?  ")).toBe("corro ahora sí");
 		expect(similarAsks("?", "¿?")).toBe(false);
+	});
+});
+
+describe("buildAsks: closed asks", () => {
+	const base = () => [user("hola"), assistant("¿Uno?\n\n¿Dos?", { id: "a1b2c3d4" })];
+	const closed = (entries: Parameters<typeof buildAsks>[0]) =>
+		buildAsks(entries).closed.map(({ ask, chain, closedBy }) => [
+			ask.ordinal,
+			chain.map((member) => member.ordinal),
+			closedBy.kind === "answer" ? `P${closedBy.prompt.prompt}` : closedBy.kind,
+		]);
+
+	it("returns the open asks as buildPending does, and no closed ones while nothing closed", () => {
+		const entries = base();
+		expect(buildAsks(entries).pending).toEqual(buildPending(entries));
+		expect(closed(entries)).toEqual([]);
+	});
+
+	it("tells an ask answered by the prompt that cites it from one dismissed, oldest first", () => {
+		const entries = [...base(), askEntry({ action: "dismiss", ask: "a1b2c3d4.2" }), user("> P1.R1.Q1: ¿Uno?\nR: sí")];
+		expect(closed(entries)).toEqual([
+			["P1.R1.Q1", [], "P2"],
+			["P1.R1.Q2", [], "dismiss"],
+		]);
+		expect(buildAsks(entries).pending).toEqual([]);
+	});
+
+	it("keeps the first prompt that answered an ask, and drops a reopened ask from the closed ones", () => {
+		const entries = [...base(), user("P1.R1.Q1 sí"), user("P1.R1.Q1 otra vez")];
+		expect(closed(entries)).toEqual([["P1.R1.Q1", [], "P2"]]);
+		const reopened = [...base(), askEntry({ action: "dismiss", ask: "a1b2c3d4.1" }), askEntry({ action: "reopen", ask: "a1b2c3d4.1" })];
+		expect(closed(reopened)).toEqual([]);
+	});
+
+	it("closes a chain once, on its newest member, with how its first member closed", () => {
+		const entries = [
+			user("a"),
+			assistant("¿Los borro?", { id: "aaaaaaa1" }),
+			user("b"),
+			assistant("¿Los borro todos?", { id: "aaaaaaa2" }),
+			askEntry({ action: "link", ask: "aaaaaaa2.1", continues: "aaaaaaa1.1" }),
+			user("> P1.R1.Q1: ¿Los borro?\nR: sí"),
+		];
+		expect(closed(entries)).toEqual([["P2.R1.Q1", ["P1.R1.Q1"], "P3"]]);
 	});
 });

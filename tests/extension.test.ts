@@ -294,7 +294,7 @@ describe("pending central", () => {
 		await commands.get("replies")!.handler("", ctx);
 		expect(seen[0][0]).toMatch(/Pending/);
 		expect(appended).toEqual([["reply-thread.ask", { action: "dismiss", ask: "a1b2c3d4.1" }]]);
-		expect(widgetText(widgets.at(-1)?.[1])).toEqual(["P1 · 2 replies: R1 prompt ⚠ · R2 job: tests · alt+r"]);
+		expect(widgetText(widgets.at(-1)?.[1])).toEqual(["P1 · 2 replies: R1 prompt · R2 job: tests · alt+r"]);
 		const again = fakeCtx(branch, "tui");
 		await commands.get("replies")!.handler("", again.ctx);
 		expect(again.seen[0][0]).toMatch(/^╭─ Replies /);

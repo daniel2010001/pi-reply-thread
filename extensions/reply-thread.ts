@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";
 import { answerFormat, FORMAT_ENTRY, formatIndex, formatPending, formatReplyPlain, widgetLines } from "../src/format.ts";
 import { findReply, noMatchMessage } from "../src/lookup.ts";
-import { ASK_ENTRY, type AskAction, buildPending } from "../src/pending.ts";
+import { ASK_ENTRY, type AskAction, buildAsks, buildPending } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
 import { type Central, OVERLAY_OPTIONS, RepliesView } from "./replies-view.ts";
 
@@ -36,11 +36,11 @@ function refreshWidget(ctx: ExtensionContext): void {
 	);
 }
 
-/** Writes a central action to the branch, outside the model context, and returns the open asks after it. */
+/** Writes a central action to the branch, outside the model context, and returns the asks after it. */
 function act(pi: ExtensionAPI, ctx: ExtensionContext, action: AskAction) {
 	pi.appendEntry(ASK_ENTRY, action);
 	refreshWidget(ctx);
-	return buildPending(ctx.sessionManager.getBranch());
+	return buildAsks(ctx.sessionManager.getBranch());
 }
 
 /**
@@ -56,7 +56,7 @@ async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string)
 		ctx.ui.notify(noMatchMessage(arg), "error");
 		return;
 	}
-	const pending = buildPending(branch, threads);
+	const { pending, closed } = buildAsks(branch, threads);
 	if (ctx.mode !== "tui") {
 		const text = pendingTab ? formatPending(pending) : reply ? formatReplyPlain(reply) : formatIndex(threads);
 		ctx.ui.notify(text, "info");
@@ -64,6 +64,7 @@ async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string)
 	}
 	const central: Central = {
 		pending,
+		closed,
 		act: (action) => act(pi, ctx, action),
 		tab: pendingTab ? "pending" : undefined,
 		format: answerFormat(branch),
