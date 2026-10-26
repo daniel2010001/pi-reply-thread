@@ -58,6 +58,9 @@ interface Overlay {
 	render(width: number): string[];
 }
 
+/** What `ctx.getSystemPrompt()` returns: the session's system prompt, which the triage sends unchanged. */
+const SESSION_PROMPT = "You are Pi, a coding agent.\n\n# Project context\n\nAGENTS.md rules go here.";
+
 /** What `/replies triage` meets: the session model, the confirm answer, the model reply and keys for the loader. */
 interface TriageSetup {
 	model?: { provider: string; id: string };
@@ -68,7 +71,8 @@ interface TriageSetup {
 }
 
 /**
- * `keys` are pressed in the overlay once it opens; `seen` keeps its first frame and, after keys, its last.
+ * `keys` are pressed in the first overlay once it opens; `seen` keeps its first frame and, after keys,
+ * its last. A later overlay (Pending reopened after a triage) closes after its first frame.
  * A custom without options is the triage loader: it gets `loaderKeys` and resolves only through `done`.
  */
 function fakeCtx(branch: SessionEntry[], mode: "tui" | "print" = "print", keys: string[] = [], triage: TriageSetup = {}) {
@@ -80,10 +84,12 @@ function fakeCtx(branch: SessionEntry[], mode: "tui" | "print" = "print", keys: 
 	const confirms: [string, string][] = [];
 	const calls: [unknown, unknown, { signal?: AbortSignal }][] = [];
 	const loaders: string[][] = [];
+	let overlays = 0;
 	const ctx = {
 		mode,
 		hasUI: mode === "tui",
 		model: triage.model,
+		getSystemPrompt: () => SESSION_PROMPT,
 		modelRegistry: {
 			streamSimple: (model: unknown, context: unknown, options: { signal: AbortSignal }) => {
 				calls.push([model, context, options]);
@@ -111,13 +117,14 @@ function fakeCtx(branch: SessionEntry[], mode: "tui" | "print" = "print", keys: 
 						for (const key of triage.loaderKeys ?? []) loader.handleInput(KEYS[key] ?? key);
 					});
 				}
+				const pressed = overlays++ ? [] : keys;
 				return new Promise((resolve) => {
 					const tui = { terminal: { rows: 30 }, requestRender: () => {} };
 					const make = factory as (...args: unknown[]) => Overlay;
 					const overlay = make(tui, fakeTheme, keybindings, resolve);
 					seen.push(overlay.render(80).map(stripTerminalSequences));
-					for (const key of keys) overlay.handleInput(KEYS[key] ?? key);
-					if (keys.length) seen.push(overlay.render(80).map(stripTerminalSequences));
+					for (const key of pressed) overlay.handleInput(KEYS[key] ?? key);
+					if (pressed.length) seen.push(overlay.render(80).map(stripTerminalSequences));
 					else resolve(undefined);
 				});
 			},
@@ -586,11 +593,34 @@ describe("/replies triage", () => {
 		branch.push(user("la primera, dale"));
 	});
 
+	/** The request, the one user message it becomes, and the tokens the confirm names for both with the session prompt. */
 	const tokens = (entries: SessionEntry[]) => {
 		const threads = buildThreads(entries);
 		const sent = triageRequest(buildAsks(entries, threads), threads);
-		return { sent, about: Math.ceil((sent?.chars ?? 0) / 4) };
+		const message = `${sent?.instructions}\n\n${sent?.text}`;
+		return { sent, message, about: Math.ceil((SESSION_PROMPT.length + message.length) / 4) };
 	};
+	const confirmText = (sent: string, about: number) =>
+		`Send ${sent} (about ${about} tokens with your session's system prompt) to anthropic/claude-test. The model only proposes; nothing closes until you accept.`;
+
+	it("registers /replies:triage with its description, and it runs the same triage as /replies triage", async () => {
+		const { commands } = load();
+		expect(commands.get("replies:triage")?.description).toBe(
+			"Ask the session model which open asks a later prompt answered or another ask repeats; it only proposes",
+		);
+		const own = load();
+		const viaOwn = fakeCtx(branch, "tui", [], { model: MODEL, confirm: false });
+		await own.commands.get("replies:triage")!.handler("", viaOwn.ctx);
+		const sub = load();
+		const viaSub = fakeCtx(branch, "tui", [], { model: MODEL, confirm: false });
+		await sub.commands.get("replies")!.handler("triage", viaSub.ctx);
+		expect(viaOwn.confirms).toEqual([["Triage open asks?", confirmText("1 open ask and 1 later prompt", tokens(branch).about)]]);
+		expect(viaOwn.confirms).toEqual(viaSub.confirms);
+		expect({ own: own.appended, sub: sub.appended, customs: viaOwn.customs }).toEqual({ own: [], sub: [], customs: [] });
+		const print = fakeCtx(branch, "print", [], { model: MODEL });
+		await load().commands.get("replies:triage")!.handler("", print.ctx);
+		expect(print.notices).toEqual([["/replies triage needs the interactive TUI.", "error"]]);
+	});
 
 	it("needs the interactive TUI: an error outside it, and nothing else", async () => {
 		const { commands, appended } = load();
@@ -623,12 +653,7 @@ describe("/replies triage", () => {
 		await commands.get("replies")!.handler("triage", ctx);
 		const { about } = tokens(branch);
 		expect(about).toBeGreaterThan(0);
-		expect(confirms).toEqual([
-			[
-				"Triage open asks?",
-				`Send 1 open ask and 1 later prompt (about ${about} tokens) to anthropic/claude-test. The model only proposes; nothing closes until you accept.`,
-			],
-		]);
+		expect(confirms).toEqual([["Triage open asks?", confirmText("1 open ask and 1 later prompt", about)]]);
 		expect({ notices, calls, customs, appended }).toEqual({ notices: [], calls: [], customs: [], appended: [] });
 	});
 
@@ -638,22 +663,22 @@ describe("/replies triage", () => {
 		const { commands } = load();
 		const { ctx, confirms } = fakeCtx(entries, "tui", [], { model: MODEL, confirm: false });
 		await commands.get("replies")!.handler("triage", ctx);
-		expect(confirms[0][1]).toBe(
-			`Send 2 open asks and 0 later prompts (about ${tokens(entries).about} tokens) to anthropic/claude-test. The model only proposes; nothing closes until you accept.`,
-		);
+		expect(confirms[0][1]).toBe(confirmText("2 open asks and 0 later prompts", tokens(entries).about));
 	});
 
 	it("sends the request to the session model under a loader, stores the proposals, refreshes the widget and opens Pending", async () => {
 		const { commands, appended } = load();
 		const triage = fakeCtx(branch, "tui", ["tui.select.cancel"], { model: MODEL, reply: reply(ONE) });
 		await commands.get("replies")!.handler("TRIAGE", triage.ctx);
-		const { sent } = tokens(branch);
+		const { sent, message } = tokens(branch);
+		// The session's system prompt goes unchanged (pi-claude-bridge accepts only that one); the instructions lead the message.
+		expect(message.startsWith(`${sent?.instructions}\n\nOpen questions:\n`)).toBe(true);
 		expect(triage.calls).toEqual([
 			[
 				MODEL,
 				{
-					systemPrompt: sent?.systemPrompt,
-					messages: [{ role: "user", content: [{ type: "text", text: sent?.text }], timestamp: expect.any(Number) }],
+					systemPrompt: SESSION_PROMPT,
+					messages: [{ role: "user", content: [{ type: "text", text: message }], timestamp: expect.any(Number) }],
 				},
 				{ signal: expect.any(AbortSignal) },
 			],
@@ -753,6 +778,51 @@ describe("/replies triage", () => {
 			expect(customs).toEqual([undefined]);
 		}
 		expect(appended).toEqual([]);
+	});
+
+	it("t in the Pending tab of alt+r closes it, runs the triage and reopens Pending with the proposals", async () => {
+		const { shortcuts, appended } = load();
+		const { ctx, seen, customs, confirms, calls, notices, pastes } = fakeCtx(branch, "tui", ["t"], { model: MODEL, reply: reply(ONE) });
+		await shortcuts.get("alt+r")!.handler(ctx);
+		const overlay = { overlay: true, overlayOptions: { width: "90%", maxHeight: "90%", anchor: "center" } };
+		expect(customs).toEqual([overlay, undefined, overlay]);
+		expect(seen[0][0]).toMatch(/^╭─ Pending /);
+		expect(confirms).toEqual([["Triage open asks?", confirmText("1 open ask and 1 later prompt", tokens(branch).about)]]);
+		expect(calls).toHaveLength(1);
+		expect(calls[0][1]).toMatchObject({ systemPrompt: SESSION_PROMPT });
+		expect(appended.map(([type]) => type)).toEqual(["reply-thread.triage"]);
+		expect(notices).toEqual([["Triage: 1 proposal; a accepts and n rejects in Pending.", "info"]]);
+		expect(seen.at(-1)?.[0]).toMatch(/^╭─ Pending /);
+		expect(seen.at(-1)).toContainEqual(expect.stringMatching(/^│ +✦ answered in P2: "la primera" +│$/));
+		expect(pastes).toEqual([]);
+	});
+
+	it("t that ends declined, failed or empty gives only its notice and does not reopen the central", async () => {
+		const cases: [TriageSetup, [string, string][]][] = [
+			[{ model: MODEL, confirm: false, reply: reply(ONE) }, []],
+			[{ model: MODEL, reply: reply("", { stopReason: "error", errorMessage: "rate limited" }) }, [["Triage failed: rate limited", "error"]]],
+			[{ model: MODEL, reply: reply(ONE, { stopReason: "aborted" }) }, [["Triage cancelled.", "info"]]],
+			[{ model: MODEL, reply: reply('{"proposals":[]}') }, [["Triage found nothing to propose.", "info"]]],
+			[{ reply: reply(ONE) }, [["No model selected; choose one with /model.", "error"]]],
+		];
+		for (const [setup, expected] of cases) {
+			const { commands, appended } = load();
+			const { ctx, customs, notices, pastes } = fakeCtx(branch, "tui", ["t"], setup);
+			await commands.get("replies")!.handler("", ctx);
+			expect(notices).toEqual(expected);
+			expect(customs.filter(Boolean)).toHaveLength(1);
+			expect({ appended, pastes }).toEqual({ appended: [], pastes: [] });
+		}
+	});
+
+	it("t in an empty Pending tab closes it and says there is nothing to triage, with no confirm", async () => {
+		const { commands, appended } = load();
+		branch.push(askEntry({ action: "dismiss", ask: "a1b2c3d4.1" }));
+		const { ctx, customs, notices, confirms, calls } = fakeCtx(branch, "tui", ["t"], { model: MODEL, reply: reply(ONE) });
+		await commands.get("replies")!.handler("pending", ctx);
+		expect(notices).toEqual([["No open asks to triage.", "info"]]);
+		expect(customs).toHaveLength(1);
+		expect({ confirms, calls, appended }).toEqual({ confirms: [], calls: [], appended: [] });
 	});
 
 	it("leaves /replies pending and /replies <id> as they were, with a triage on the branch and no model call", async () => {

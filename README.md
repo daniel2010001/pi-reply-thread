@@ -20,7 +20,7 @@ place, where you answer them by pasting a quote.
 ╰─ ↑↓ move · enter open · esc close ───────────────────────────────────────╯
 ```
 
-- No extra model call. Everything is computed from the session branch; only the optional `/replies triage` calls your session model, after you confirm it.
+- No extra model call. Everything is computed from the session branch; only the optional triage (`/replies:triage`, or `t` in Pending) calls your session model, after you confirm it.
 - Nothing enters the model context.
 - Works after `/resume` and on any branch, because the index is rebuilt from the branch every time.
 
@@ -48,7 +48,7 @@ gsh -- -e ./extensions/reply-thread.ts   # Gentle Shell
 |---|---|
 | `/replies` or `Alt+R` | Opens the overlay on **Pending** while any ask is open, else on **Replies** (the index of the current branch, newest prompt first). `Tab` cycles Pending → Replies → Answered. |
 | `/replies pending` | Opens the **Pending** tab, even when nothing waits. |
-| `/replies triage` | Asks your session model which open asks a later prompt already answered or another ask repeats, after a confirm; see [Triage](#triage-optional-uses-your-session-model). |
+| `/replies:triage` or `/replies triage` | Asks your session model which open asks a later prompt already answered or another ask repeats, after a confirm; `t` in Pending does the same. See [Triage](#triage-optional-uses-your-session-model). |
 | `/replies P12.R1` | Opens one reply in full by its ordered ID (case-insensitive). |
 | `/replies a1b2c3d4` | Opens one reply in full by its entry ID. |
 | `/replies P12.R1.Q2` or `/replies a1b2c3d4.2` | Opens the reply that asks that question. |
@@ -192,7 +192,7 @@ that look alike show as one row, on the newest of them (see [Repeated asks](#rep
 │  ○ P2.R2.Q1  Should I delete the three old branches?  ≈ 1 similar                      │
 │ ▌P1  clean up the old branches                                                   11:47 │
 │  ○ P1.R1.Q2  Needs your decision: push to main.                                        │
-╰─ enter answer · y yes · f format · ? help · esc close ─────────────────────────────────╯
+╰─ enter answer · y yes · f format · t triage · ? help · esc close ──────────────────────╯
 ```
 
 | Key | What it does |
@@ -206,6 +206,7 @@ that look alike show as one row, on the newest of them (see [Repeated asks](#rep
 | `o` | Opens the reply that asks it; `Esc` comes back. |
 | `→` / `←` | Expands a row with `≈ N similar` to show its similar asks under it / collapses it again. |
 | `l` / `u` | Links the marked asks (2 or more) as one chain, or the selected row and its similar asks to the oldest of them / unlinks the chain. |
+| `t` | Closes the overlay and runs the triage (see [Triage](#triage-optional-uses-your-session-model)); Pending reopens with its proposals. |
 | `a` / `n` | Accepts / rejects the row's `✦` triage proposal (see [Triage](#triage-optional-uses-your-session-model)). |
 | `Backspace` (`⌫`) | Undoes the last `x`, `l`, `u`, `a` or `n` (see [Undo](#undo)). |
 | `Tab` | Goes to the next tab: Pending → Replies → Answered → Pending. |
@@ -321,16 +322,25 @@ model context), so they follow `/resume` and branches like everything else.
 
 ### Triage (optional, uses your session model)
 
-Everything above works without a model. When the open asks pile up, `/replies triage` asks the model
-selected in your session to point out two things: an open ask a later prompt already answered without
-quoting it, and two open asks that ask the same thing in other words.
+Everything above works without a model. When the open asks pile up, `/replies:triage` (or
+`/replies triage`, or `t` in the Pending tab) asks the model selected in your session to point out
+two things: an open ask a later prompt already answered without quoting it, and two open asks that
+ask the same thing in other words.
 
-- **What is sent**: every open ask (ordered ID and text) and every prompt of yours after the oldest
-  open ask (`P#` and text, each cut at 2000 characters). Nothing else from the session.
-- **Cost**: it is one model call on your account. A confirm names the model, how many asks and
-  prompts it sends and their rough size in tokens; declining sends nothing.
+- **What is sent**: one message with the triage instructions, every open ask (ordered ID and text)
+  and every prompt of yours after the oldest open ask (`P#` and text, each cut at 2000 characters),
+  under your session's system prompt, unchanged. No other message of the session goes.
+- **Why the system prompt goes too**: some providers accept only the session's own system prompt.
+  `pi-claude-bridge`, for one, rejects any other (`prompt-capture: no capture for this … system
+  prompt`), so the instructions travel in the message instead.
+- **Cost**: it is one model call on your account, and the session's system prompt (often thousands
+  of tokens with your context files and skills) is most of it. A confirm names the model, how many
+  asks and prompts it sends and their rough size in tokens, system prompt included; declining sends
+  nothing.
 - **Esc** while it waits cancels the call; nothing is written.
 - Only the TUI runs it. Without open asks or without a selected model it says so and calls nothing.
+- `t` in Pending closes the overlay first. When the triage stores proposals, Pending opens again with
+  them; when you decline, cancel, it fails or finds nothing, you only get its notice.
 
 The model only proposes. Each proposal it gives that holds up (known IDs, the quote really in that
 prompt, the prompt after the ask) is stored in a `reply-thread.triage` entry, and Pending opens with a
@@ -351,7 +361,7 @@ Nothing closes or links until you press a key on the row:
 - `n` rejects it: it hides, and a new triage does not show it again. The next one, if any, shows.
 - `Backspace` undoes either: an accepted answer is reopened, a link unlinked, a rejection restored.
 
-A new `/replies triage` replaces the proposals of the previous one; a proposal that no longer applies
+A new triage replaces the proposals of the previous one; a proposal that no longer applies
 (its ask closed, or the other ask closed or linked) does not show.
 
 ### Answered asks

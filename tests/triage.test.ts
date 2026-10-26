@@ -49,8 +49,11 @@ describe("triageRequest", () => {
 				"y Piper me   parece bien",
 			].join("\n"),
 		);
-		expect(sent).toMatchObject({ asks: 3, prompts: 2, chars: sent?.text.length });
-		expect(sent?.systemPrompt).toContain('{"proposals":[');
+		// The instructions travel in the user message, so the session's own system prompt can go unchanged.
+		expect(Object.keys(sent ?? {}).sort()).toEqual(["asks", "instructions", "prompts", "text"]);
+		expect(sent).toMatchObject({ asks: 3, prompts: 2 });
+		expect(sent?.instructions).toMatch(/^You review the open questions an AI assistant asked a user/);
+		expect(sent?.instructions).toContain('{"proposals":[');
 	});
 
 	it("leaves out closed asks and the prompts before the oldest open one", () => {

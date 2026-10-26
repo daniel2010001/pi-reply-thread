@@ -4,7 +4,8 @@ import type { Thread } from "./threads.ts";
 /** Longest prompt text sent to the model; a longer one is cut and ends with `…`. */
 const PROMPT_LIMIT = 2000;
 
-const SYSTEM_PROMPT = `You review the open questions an AI assistant asked a user, and the user's later prompts.
+/** Leads the user message; the session's own system prompt goes unchanged, since some providers accept only that one. */
+const INSTRUCTIONS = `You review the open questions an AI assistant asked a user, and the user's later prompts.
 Propose only what the text clearly shows:
 - "answered": a later prompt answers an open question without quoting it. Give the question ID, the
   prompt ID (P#) and "quote", an exact excerpt of that prompt that is the answer.
@@ -15,12 +16,10 @@ Reply with this JSON object and nothing else:
 
 /** What `/replies triage` sends: the instructions, the open asks and later prompts, and their counts. */
 export interface TriageRequest {
-	systemPrompt: string;
+	instructions: string;
 	text: string;
 	asks: number;
 	prompts: number;
-	/** Characters of `text`, for the confirmation's size. */
-	chars: number;
 }
 
 /** Every open ask, chain members too, oldest first. */
@@ -43,7 +42,7 @@ export function triageRequest(state: AskState, threads: readonly Thread[]): Tria
 	const later = threads.filter((thread) => thread.entryId && thread.prompt > after);
 	const prompts = later.length ? later.flatMap((thread) => [`--- P${thread.prompt} ---`, cut(thread.promptText)]) : ["(none)"];
 	const text = ["Open questions:", ...asks.map((ask) => `${ask.ordinal}: ${ask.text}`), "", "Later user prompts:", ...prompts].join("\n");
-	return { systemPrompt: SYSTEM_PROMPT, text, asks: asks.length, prompts: later.length, chars: text.length };
+	return { instructions: INSTRUCTIONS, text, asks: asks.length, prompts: later.length };
 }
 
 /** The JSON object of a reply: the whole reply, or from its first `{` to its last `}`. */

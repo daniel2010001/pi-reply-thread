@@ -6,7 +6,7 @@ import { findReply, noMatchMessage } from "../src/lookup.ts";
 import { ASK_ENTRY, type AskAction, buildAsks, buildPending, similarGroups, TRIAGE_ENTRY } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
 import { parseTriage, triageRequest } from "../src/triage.ts";
-import { type Central, OVERLAY_OPTIONS, RepliesView } from "./replies-view.ts";
+import { type Central, OVERLAY_OPTIONS, RepliesView, type ViewResult } from "./replies-view.ts";
 
 const WIDGET = "reply-thread";
 
@@ -15,6 +15,9 @@ const SHORTCUT = "alt+r";
 
 const DESCRIPTION =
 	"List the replies of each prompt and the asks waiting on you; /replies <P#.R#[.Q#] | entry ID[.#]> opens one in full, /replies pending lists the open asks, /replies triage asks the session model to propose answered and repeated asks";
+
+const TRIAGE_DESCRIPTION =
+	"Ask the session model which open asks a later prompt answered or another ask repeats; it only proposes";
 
 /** Which lines of a reply are asks; Gentle Shell passes it after `--`. */
 const FLAG = "reply-thread-asks";
@@ -71,7 +74,7 @@ function act(pi: ExtensionAPI, ctx: ExtensionContext, action: AskAction) {
 
 /**
  * Opens the central, or the reply `arg` names, or the Pending tab for `pending`; plain text outside
- * the TUI. Answering in the central pastes the quotes into the editor.
+ * the TUI. Answering in the central pastes the quotes into the editor; `t` in Pending runs the triage.
  */
 async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string): Promise<void> {
 	const branch = ctx.sessionManager.getBranch();
@@ -98,11 +101,12 @@ async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string)
 		setFormat: (format) => pi.appendEntry(FORMAT_ENTRY, { format }),
 		mode,
 	};
-	const paste = await ctx.ui.custom<string | undefined>(
+	const result = await ctx.ui.custom<ViewResult | undefined>(
 		(tui, theme, keybindings, done) => new RepliesView(tui, theme, keybindings, threads, done, reply, central),
 		{ overlay: true, overlayOptions: OVERLAY_OPTIONS },
 	);
-	if (paste) ctx.ui.pasteToEditor(paste);
+	if (typeof result === "string" && result) ctx.ui.pasteToEditor(result);
+	else if (typeof result === "object") await triage(pi, ctx);
 }
 
 /** How the model call ended: its reply text, its error, or undefined when cancelled. */
@@ -131,10 +135,14 @@ async function triage(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
 		return;
 	}
 	const name = `${model.provider}/${model.id}`;
+	// pi-claude-bridge accepts only the session's own system prompt, so the instructions lead the message.
+	const systemPrompt = ctx.getSystemPrompt();
+	const message = `${request.instructions}\n\n${request.text}`;
 	const sent = `${plural(request.asks, "open ask", "open asks")} and ${plural(request.prompts, "later prompt", "later prompts")}`;
+	const tokens = Math.ceil((systemPrompt.length + message.length) / 4);
 	const ok = await ctx.ui.confirm(
 		"Triage open asks?",
-		`Send ${sent} (about ${Math.ceil(request.chars / 4)} tokens) to ${name}. The model only proposes; nothing closes until you accept.`,
+		`Send ${sent} (about ${tokens} tokens with your session's system prompt) to ${name}. The model only proposes; nothing closes until you accept.`,
 	);
 	if (!ok) return;
 
@@ -148,8 +156,8 @@ async function triage(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
 		};
 		loader.onAbort = () => finish(undefined);
 		const context = {
-			systemPrompt: request.systemPrompt,
-			messages: [{ role: "user" as const, content: [{ type: "text" as const, text: request.text }], timestamp: Date.now() }],
+			systemPrompt,
+			messages: [{ role: "user" as const, content: [{ type: "text" as const, text: message }], timestamp: Date.now() }],
 		};
 		const call = async (): Promise<TriageOutcome> => {
 			const message = await ctx.modelRegistry.streamSimple(model, context, { signal: loader.signal }).result();
@@ -195,6 +203,8 @@ export default function replyThread(pi: ExtensionAPI): void {
 			return arg.toLowerCase() === "triage" ? triage(pi, ctx) : openReplies(pi, ctx, arg);
 		},
 	});
+
+	pi.registerCommand("replies:triage", { description: TRIAGE_DESCRIPTION, handler: (_args, ctx) => triage(pi, ctx) });
 
 	pi.registerShortcut(SHORTCUT, {
 		description: "Open the pending asks and the reply index (/replies)",

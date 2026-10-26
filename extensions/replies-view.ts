@@ -54,6 +54,9 @@ type Hint = [key: string, action: string];
 
 export type Tab = "pending" | "replies" | "answered";
 
+/** How the view closed with something to do: the text to paste, or `t` asking for a triage. */
+export type ViewResult = string | { triage: true };
+
 /** The pending central: the open asks, and how to dismiss or link them on the branch. */
 export interface Central {
 	pending: readonly PendingAsk[];
@@ -175,14 +178,14 @@ function scrollCells(theme: Theme, total: number, height: number, top: number): 
 /**
  * The thread list with a full-reply viewer: Enter opens a reply, Esc goes back, Esc on the list closes.
  * With a central, a Pending tab lists the open asks; Enter or `y` closes it with the text to paste,
- * in the format `f` toggles. An Answered tab lists the closed asks and how they closed; `r` reopens one.
+ * in the format `f` toggles, and `t` closes it asking for a triage. An Answered tab lists the closed asks and how they closed; `r` reopens one.
  * Backspace in either tab undoes the newest action this overlay wrote.
  */
 export class RepliesView implements Component {
 	private readonly tui: TUI;
 	private readonly theme: Theme;
 	private readonly keybindings: KeybindingsManager;
-	private readonly done: (paste?: string) => void;
+	private readonly done: (result?: ViewResult) => void;
 	private readonly rows: IndexRow[];
 	private readonly counts: string;
 	private readonly ordinalWidth: number;
@@ -231,7 +234,7 @@ export class RepliesView implements Component {
 		theme: Theme,
 		keybindings: KeybindingsManager,
 		threads: readonly Thread[],
-		done: (paste?: string) => void,
+		done: (result?: ViewResult) => void,
 		direct?: Reply,
 		central?: Central,
 	) {
@@ -515,6 +518,10 @@ export class RepliesView implements Component {
 		const proposal = ask?.proposals?.[0];
 		if (kb.matches(data, "tui.select.cancel")) {
 			this.done();
+			return false;
+		}
+		if (matchesKey(data, "t")) {
+			this.done({ triage: true });
 			return false;
 		}
 		if (matchesKey(data, "tab")) this.tab = "replies";
@@ -825,6 +832,7 @@ export class RepliesView implements Component {
 			["enter", "answer"],
 			["y", "yes"],
 			["f", "format"],
+			["t", "triage"],
 			["?", "help"],
 			["esc", "close"],
 		];
@@ -975,6 +983,7 @@ export class RepliesView implements Component {
 			{ note: "✓? like <ID>: looks answered by that closed ask; it stays open until you answer it or press x.", indent: true },
 			["u", "unlink the ask from its chain"],
 			["o", "open the reply that asks it"],
+			["t", "triage: ask the session model for ✦ proposals"],
 			["a", "accept the row's ✦ triage proposal"],
 			["n", "reject the row's ✦ triage proposal"],
 			{ note: "✦ comes from /replies triage: a model's proposal; nothing closes or links until you press a.", indent: true },

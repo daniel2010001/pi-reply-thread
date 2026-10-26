@@ -10,7 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { RepliesView } from "../extensions/replies-view.ts";
+import { RepliesView, type ViewResult } from "../extensions/replies-view.ts";
 import type { AskMode } from "../src/asks.ts";
 import type { AnswerFormat } from "../src/format.ts";
 import { type AskAction, buildAsks } from "../src/pending.ts";
@@ -52,7 +52,7 @@ function central(
 	entries: SessionEntry[],
 	options: { rows?: number; tab?: "pending" | "replies"; format?: AnswerFormat; mode?: AskMode } = {},
 ) {
-	let closed: { paste?: string } | undefined;
+	let closed: { paste?: ViewResult } | undefined;
 	const actions: AskAction[] = [];
 	const formats: AnswerFormat[] = [];
 	const tui = { terminal: { rows: options.rows ?? 30 }, requestRender: () => {} } as unknown as TUI;
@@ -68,7 +68,7 @@ function central(
 		theme,
 		keybindings,
 		threads,
-		(paste?: string) => (closed = { paste }),
+		(paste?: ViewResult) => (closed = { paste }),
 		undefined,
 		{
 			...buildAsks(entries, threads),
@@ -117,7 +117,7 @@ describe("Pending tab", () => {
 		// P3.R1.Q1 repeats P1.R1.Q1, and a repeat group counts once.
 		expect(rows[0]).toMatch(/^╭─ Pending ─+ 2 open · 0 linked ─╮$/);
 		expect(rows.at(-1)).toMatch(
-			/^╰─ enter answer · y yes · f format · \? help · esc close ─+╯$/,
+			/^╰─ enter answer · y yes · f format · t triage · \? help · esc close ─+╯$/,
 		);
 		view.key("\t");
 		expect(view.text()[0]).toMatch(/^╭─ Replies ─+ 3 prompts · 3 replies ─╮$/);
@@ -241,12 +241,12 @@ describe("answering from the central", () => {
 		expect(view.formats).toEqual([]);
 	});
 
-	it("shows the short hints whole from 60 columns, whatever the selected ask allows, and cuts them below", () => {
+	it("shows the short hints whole from 70 columns, whatever the selected ask allows, and cuts them below", () => {
 		const view = central(branch);
-		expect(view.text(60).at(-1)).toBe("╰─ enter answer · y yes · f format · ? help · esc close ───╯");
-		expect(view.text(80).at(-1)).toBe(`╰─ enter answer · y yes · f format · ? help · esc close ${"─".repeat(23)}╯`);
+		expect(view.text(70).at(-1)).toBe("╰─ enter answer · y yes · f format · t triage · ? help · esc close ──╯");
+		expect(view.text(80).at(-1)).toBe(`╰─ enter answer · y yes · f format · t triage · ? help · esc close ${"─".repeat(12)}╯`);
 		view.keys(" ", "tui.select.down", " ");
-		expect(view.text(80).at(-1)).toBe(`╰─ enter answer · y yes · f format · ? help · esc close ${"─".repeat(23)}╯`);
+		expect(view.text(80).at(-1)).toBe(`╰─ enter answer · y yes · f format · t triage · ? help · esc close ${"─".repeat(12)}╯`);
 		expect(view.text(40).at(-1)).toBe("╰─ enter answer · y yes · f format ·… ─╯");
 	});
 
@@ -259,6 +259,44 @@ describe("answering from the central", () => {
 		expect(view.closed()).toBeUndefined();
 		view.key("tui.select.cancel");
 		expect(view.closed()).toEqual({ paste: undefined });
+	});
+
+	it("t closes Pending asking for a triage, with marks too, and writes nothing", () => {
+		const view = central(branch);
+		view.key(" ");
+		view.key("t");
+		expect(view.closed()).toEqual({ paste: { triage: true } });
+		expect(view.actions).toEqual([]);
+	});
+
+	it("t closes an empty Pending tab asking for a triage too; the command says there is nothing to triage", () => {
+		const view = central([user("hola"), assistant("Listo.")], { tab: "pending" });
+		expect(view.text().some((line) => line.includes("Nothing waits on you."))).toBe(true);
+		view.key("t");
+		expect(view.closed()).toEqual({ paste: { triage: true } });
+	});
+
+	it("t means nothing in the Replies and Answered tabs, in the help card or in the reply viewer", () => {
+		const view = central(branch);
+		view.key("\t");
+		view.key("t");
+		expect(view.text()[0]).toMatch(/^╭─ Replies /);
+		view.keys("\t", "t");
+		expect(view.text()[0]).toMatch(/^╭─ Answered /);
+		view.keys("\t", "?", "t");
+		expect(view.text()[0]).toMatch(/^╭─ Keys /);
+		view.keys("?", "o", "t");
+		expect(view.text()[0]).toMatch(/^╭─ P3\.R1 /);
+		expect(view.closed()).toBeUndefined();
+	});
+
+	it("the key help lists t under Pending, before a and n", () => {
+		const view = central(branch, { rows: 60 });
+		view.key("?");
+		const rows = view.text(140);
+		const at = rows.findIndex((line) => /^│ {3}t +triage: ask the session model for ✦ proposals +│$/.test(line));
+		expect(at).toBeGreaterThan(rows.findIndex((line) => /^│ Pending +│$/.test(line)));
+		expect(rows[at + 1]).toMatch(/^│ {3}a +accept the row's ✦ triage proposal +│$/);
 	});
 });
 
@@ -1468,8 +1506,8 @@ describe("triage proposals", () => {
 
 	it("keeps the short hints line as it was with proposals on screen", () => {
 		const view = central(triaged([SAME, ANSWERED]));
-		expect(view.text(60).at(-1)).toBe("╰─ enter answer · y yes · f format · ? help · esc close ───╯");
-		expect(view.text(80).at(-1)).toBe(`╰─ enter answer · y yes · f format · ? help · esc close ${"─".repeat(23)}╯`);
+		expect(view.text(70).at(-1)).toBe("╰─ enter answer · y yes · f format · t triage · ? help · esc close ──╯");
+		expect(view.text(80).at(-1)).toBe(`╰─ enter answer · y yes · f format · t triage · ? help · esc close ${"─".repeat(12)}╯`);
 	});
 
 	it("the key help lists a and n with the ✦ note under them and still fits the cap", () => {

@@ -9,7 +9,13 @@
   row that has one (`✦ answered in P2: "<quote>"` or `✦ same as P1.R1.Q2  <ask>`, `+N more`).
 - Nothing closes or links by itself: `a` accepts the row's first proposal (an answer with the quote, or
   the link `l` writes), `n` rejects it so it does not come back, and `Backspace` undoes both. The `?`
-  card lists `a` and `n`; the short hints are unchanged.
+  card lists `a` and `n`.
+- The triage also runs as `/replies:triage` (easier to find in the command list) and with `t` in the
+  Pending tab, which closes the overlay, runs it and reopens Pending with the proposals; the short
+  hints show `t triage` and the `?` card lists it.
+- The triage works through `pi-claude-bridge`: it sends your session's system prompt unchanged (the
+  bridge rejects any other) and puts its instructions in the message. The confirm's token estimate
+  counts that system prompt too (`with your session's system prompt`).
 
 ## 0.1.0 (2026-10-26)
 
