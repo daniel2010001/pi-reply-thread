@@ -1,6 +1,6 @@
 {
   "name": "pi-reply-thread",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Index the replies one prompt produces in a Pi or Gentle Shell session: ordered and unique IDs, what triggered each reply, and the replies still waiting on you.",
   "type": "module",
   "license": "MIT",

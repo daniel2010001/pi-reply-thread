@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-10-26)
 
 - `/replies triage` (optional, TUI only): after a confirm that names the model, the number of open
   asks and later prompts and their rough size in tokens, the session model proposes which open asks a
