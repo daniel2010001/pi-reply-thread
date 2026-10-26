@@ -73,7 +73,7 @@ reply an ordered and a unique ID, and keeps the open asks of earlier replies vis
 | T42 | S11 | [x] `/replies triage` command (confirm, session model, Esc cancels), `✦` proposal line with `a`/`n` and undo in the central, README, CHANGELOG, help | gentle-ai-worker, test-first (context backstop) | `97a7deb`, `89dab26` |
 | T43 | S11 | [x] Triage through claude-bridge (session system prompt, instructions in the message), `/replies:triage`, `t` in Pending (L68-L69) | gentle-ai-worker, test-first (context backstop) | `7b9411a` |
 | T44 | S11 | [x] Triage sends the latest turn's system prompt (pi-claude-bridge, L71) | inline, test-first | `ae27ba8` |
-| T45 | S11 | [ ] `a` on a repeat group: first `a` unfolds and arms, second `a` closes the whole group with the proposal (L73-L74) | gentle-ai-worker, test-first (context backstop) | — |
+| T45 | S11 | [x] `a` on a repeat group: first `a` unfolds and arms, second `a` closes the whole group with the proposal (L73-L74) | gentle-ai-worker, test-first (context backstop) | `de96c20` |
 | T7 | S1-S6 | [x] README (English), command help, CHANGELOG | inline | `e9d0b1f` |
 
 ## Log
@@ -203,3 +203,4 @@ R: sí funciona, pero es un poco intuitivo, me refiero a que primero tenemos que
   - Esc while armed only disarms (the overlay stays open). Any other key disarms and then does what it does today. Moving the selection disarms.
   - `a` on an expanded member row, or on a group of one, acts at once as today. `n` is unchanged.
   - `?` card: the `a` line becomes `accept the row's ✦ proposal; on a group, a twice closes the whole group`. README keys/Triage text and CHANGELOG follow.
+- L75 (2026-10-26, T45 evidence): worker mvprogcj-1-zpxr, parent committed `de96c20` (251+/15-). RED 8 of 98 central tests (6 behaviour + 2 help pins); preserve tests (member `a`, `n` on a group, lone `a`) green before. GREEN 320/320, typecheck clean. Pin changed: the same-proposal test now presses `a` twice (its row heads a group). Interpretations: N counts the group's rows and chain members, not the other row of a `same`; Esc keeps the group unfolded; the second `a` folds the group back before writing so Backspace restores the first view. Not checked live yet.
