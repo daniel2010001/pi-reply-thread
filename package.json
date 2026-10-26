@@ -5,6 +5,14 @@
   "type": "module",
   "license": "MIT",
   "author": "Daniel Li",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/daniel2010001/pi-reply-thread.git"
+  },
+  "homepage": "https://github.com/daniel2010001/pi-reply-thread#readme",
+  "bugs": {
+    "url": "https://github.com/daniel2010001/pi-reply-thread/issues"
+  },
   "keywords": [
     "pi-package",
     "pi-extension",

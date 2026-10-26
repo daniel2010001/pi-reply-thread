@@ -30,7 +30,7 @@ Which questions count as asks? See [How asks are found](#how-asks-are-found): wh
 ## Install
 
 ```sh
-pi install git:github.com/<owner>/pi-reply-thread
+pi install git:github.com/daniel2010001/pi-reply-thread
 ```
 
 Or try it for one session from a clone:
