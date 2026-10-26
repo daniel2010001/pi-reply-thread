@@ -18,6 +18,12 @@
   counts that system prompt too (`with your session's system prompt`).
   It is the system prompt of the latest turn (the idle one lacks what extensions add per turn, and the
   bridge refuses it); before any turn since loading, a bridge failure says to send a prompt first.
+- `a` on a group row (`≈ N similar`) no longer accepts the proposal for its newest ask only: the first
+  `a` opens the group and the hints show `a close all N with this answer · esc cancel`; the second
+  closes the whole group with that proposal (an `answered` one closes every ask of the group, a `same`
+  one joins the group and the other row in one chain), as one step `Backspace` undoes. `Esc` or any
+  other key cancels. On an ask of an opened group or a single row, `a` acts at once as before. The `?`
+  card says so.
 
 ## 0.1.0 (2026-10-26)
 

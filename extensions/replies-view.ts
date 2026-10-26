@@ -186,6 +186,8 @@ export class RepliesView implements Component {
 	private readonly theme: Theme;
 	private readonly keybindings: KeybindingsManager;
 	private readonly done: (result?: ViewResult) => void;
+	/** Set once `done` closed the overlay. */
+	private finished = false;
 	private readonly rows: IndexRow[];
 	private readonly counts: string;
 	private readonly ordinalWidth: number;
@@ -218,6 +220,8 @@ export class RepliesView implements Component {
 	private readonly groups = new Map<string, PendingAsk[]>();
 	/** Unique IDs of the group rows `→` expanded. */
 	private readonly unfolded = new Set<string>();
+	/** Unique ID of the group row a first `a` armed; a second `a` on it closes the whole group. */
+	private armed: string | undefined;
 	/** Every open row in list order, a group's older members right after it, folded ones too. */
 	private listOrder: PendingAsk[] = [];
 	private readonly marked = new Set<string>();
@@ -241,7 +245,10 @@ export class RepliesView implements Component {
 		this.tui = tui;
 		this.theme = theme;
 		this.keybindings = keybindings;
-		this.done = done;
+		this.done = (result) => {
+			this.finished = true;
+			done(result);
+		};
 		this.central = central;
 		this.tab = central ? (central.tab ?? (central.pending.length ? "pending" : "replies")) : "replies";
 		if (central) {
@@ -322,6 +329,7 @@ export class RepliesView implements Component {
 		} else if (this.help) {
 			if (!this.helpInput(data)) return;
 		} else if (this.central && matchesKey(data, "?")) {
+			this.armed = undefined;
 			this.help = true;
 			this.helpTop = 0;
 		} else if (this.tab === "pending") {
@@ -476,17 +484,33 @@ export class RepliesView implements Component {
 	}
 
 	/**
-	 * The actions that accept a triage proposal: `answered` closes its ask with the quote, `same` links
-	 * the selected row and the row holding the other ask as one chain. Empty when that row is gone.
+	 * The actions that accept a triage proposal for `rows` (the selected row, or its whole repeat group):
+	 * `answered` links the rows as one chain and closes it with the quote, `same` links the rows and the row
+	 * holding the other ask as one chain. Empty when that row is gone.
 	 */
-	private accept(row: PendingAsk, proposal: LiveProposal): AskAction[] {
+	private accept(rows: PendingAsk[], proposal: LiveProposal): AskAction[] {
 		if (proposal.kind === "answered") {
-			return [{ action: "answer", ask: proposal.ask.id, prompt: proposal.prompt.entryId as string, text: proposal.quote }];
+			const prompt = proposal.prompt.entryId as string;
+			return [...groupLinks(rows), { action: "answer", ask: proposal.ask.id, prompt, text: proposal.quote }];
 		}
 		const other = this.pending.find(
 			(next) => next.id === proposal.as.id || next.chain.some((member) => member.id === proposal.as.id),
 		);
-		return other ? groupLinks([row, other]) : [];
+		if (!other) return [];
+		return groupLinks(rows.includes(other) ? rows : [...rows, other]);
+	}
+
+	/** The repeat group of a group row with 2+ rows, else nothing. */
+	private groupOf(row: PendingRow | undefined): PendingAsk[] | undefined {
+		if (row?.kind !== "ask") return undefined;
+		const group = this.groups.get(row.ask.id);
+		return group && group.length > 1 ? group : undefined;
+	}
+
+	/** The asks a group closes: every row of it and their chain members. */
+	private armedCount(): number {
+		const group = this.armed ? (this.groups.get(this.armed) ?? []) : [];
+		return group.reduce((count, row) => count + 1 + row.chain.length, 0);
 	}
 
 	/** Writes the actions of one key, which Backspace can undo as one step. */
@@ -509,8 +533,30 @@ export class RepliesView implements Component {
 		if (step) this.write(step.map(inverse).reverse());
 	}
 
-	/** Keys of the Pending tab; false when the key means nothing there. */
+	/**
+	 * Keys of the Pending tab; false when the key means nothing there. While a group is armed, a second `a`
+	 * on its row closes the whole group, Esc only disarms, and any other key disarms and acts as usual.
+	 */
 	private pendingInput(data: string): boolean {
+		if (!this.armed) return this.pendingKey(data);
+		const row = this.pendingRows[this.pendingSelected];
+		const group = this.groupOf(row);
+		const proposal = row?.kind === "ask" ? row.ask.proposals?.[0] : undefined;
+		const armed = this.armed;
+		this.armed = undefined;
+		if (this.keybindings.matches(data, "tui.select.cancel")) return true;
+		if (matchesKey(data, "a") && row?.kind === "ask" && row.ask.id === armed && group && proposal) {
+			const actions = this.accept(group, proposal);
+			// The group folds back first, so Backspace brings it back as it was before the first `a`.
+			if (actions.length) this.unfolded.delete(armed);
+			this.act(actions);
+			return true;
+		}
+		// The hints change back even when the key means nothing there, unless it closed the overlay.
+		return this.pendingKey(data) || !this.finished;
+	}
+
+	private pendingKey(data: string): boolean {
 		const kb = this.keybindings;
 		const page = this.listHeight() - 1;
 		const row = this.pendingRows[this.pendingSelected];
@@ -565,8 +611,13 @@ export class RepliesView implements Component {
 		} else if (matchesKey(data, "u") && ask?.continues) {
 			this.act([{ action: "unlink", ask: ask.id, continues: ask.continues }]);
 		} else if (matchesKey(data, "o") && ask) this.open(ask.reply, ask.thread);
-		else if (matchesKey(data, "a") && ask && proposal) {
-			const actions = this.accept(ask, proposal);
+		else if (matchesKey(data, "a") && ask && proposal && this.groupOf(row)) {
+			// A group row unfolds and arms first; the second `a` closes the whole group.
+			this.unfolded.add(ask.id);
+			this.setPending(this.pending);
+			this.armed = ask.id;
+		} else if (matchesKey(data, "a") && ask && proposal) {
+			const actions = this.accept([ask], proposal);
 			if (!actions.length) return false;
 			this.act(actions);
 		} else if (matchesKey(data, "n") && proposal) {
@@ -826,8 +877,14 @@ export class RepliesView implements Component {
 		return selected ? theme.bg("selectedBg", line) : line;
 	}
 
-	/** The short hints; `?` lists the rest. */
+	/** The short hints; `?` lists the rest. While a group is armed, only how to close it or cancel. */
 	private pendingHints(): Hint[] {
+		if (this.armed) {
+			return [
+				["a", `close all ${this.armedCount()} with this answer`],
+				["esc", "cancel"],
+			];
+		}
 		return [
 			["enter", "answer"],
 			["y", "yes"],
@@ -984,7 +1041,7 @@ export class RepliesView implements Component {
 			["u", "unlink the ask from its chain"],
 			["o", "open the reply that asks it"],
 			["t", "triage: ask the session model for ✦ proposals"],
-			["a", "accept the row's ✦ triage proposal"],
+			["a", "accept the row's ✦ proposal; on a group, a twice closes the whole group"],
 			["n", "reject the row's ✦ triage proposal"],
 			{ note: "✦ comes from /replies triage: a model's proposal; nothing closes or links until you press a.", indent: true },
 			["⌫", "undo the last action"],

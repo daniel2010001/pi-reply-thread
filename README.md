@@ -207,7 +207,7 @@ that look alike show as one row, on the newest of them (see [Repeated asks](#rep
 | `→` / `←` | Expands a row with `≈ N similar` to show its similar asks under it / collapses it again. |
 | `l` / `u` | Links the marked asks (2 or more) as one chain, or the selected row and its similar asks to the oldest of them / unlinks the chain. |
 | `t` | Closes the overlay and runs the triage (see [Triage](#triage-optional-uses-your-session-model)); Pending reopens with its proposals. |
-| `a` / `n` | Accepts / rejects the row's `✦` triage proposal (see [Triage](#triage-optional-uses-your-session-model)). |
+| `a` / `n` | Accepts / rejects the row's `✦` triage proposal (see [Triage](#triage-optional-uses-your-session-model)). On a row with `≈ N similar`, the first `a` opens the group and the second closes the whole group with that proposal. |
 | `Backspace` (`⌫`) | Undoes the last `x`, `l`, `u`, `a` or `n` (see [Undo](#undo)). |
 | `Tab` | Goes to the next tab: Pending → Replies → Answered → Pending. |
 | `?` | Shows a card with every key of each tab; `?` or `Esc` hides it. |
@@ -360,8 +360,16 @@ Nothing closes or links until you press a key on the row:
 - `a` accepts the first proposal shown. `answered` closes the ask as answered by that prompt, with the
   quote as its answer (the Answered tab shows `↳ P2  let's go with T14`); `same` links the two rows,
   as `l` does.
+- On a group row (`≈ N similar`), `a` asks first: it opens the group, as `→` does, and the hints
+  become `a close all N with this answer · esc cancel`, N counting every ask of the group, chain
+  members too. A second `a` links the group as `l` does and accepts the proposal for all of it:
+  `answered` closes every ask of the group with the quote, `same` makes the group and the other row
+  one chain. `Esc` cancels and leaves the overlay open; any other key cancels and does what it
+  usually does. On an ask of an opened group, or a row without similar asks, `a` acts at once on that
+  ask only.
 - `n` rejects it: it hides, and a new triage does not show it again. The next one, if any, shows.
 - `Backspace` undoes either: an accepted answer is reopened, a link unlinked, a rejection restored.
+  A whole group accepted with `a` twice comes back in one step.
 
 A new triage replaces the proposals of the previous one; a proposal that no longer applies
 (its ask closed, or the other ask closed or linked) does not show.

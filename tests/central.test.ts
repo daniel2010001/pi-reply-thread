@@ -296,7 +296,7 @@ describe("answering from the central", () => {
 		const rows = view.text(140);
 		const at = rows.findIndex((line) => /^│ {3}t +triage: ask the session model for ✦ proposals +│$/.test(line));
 		expect(at).toBeGreaterThan(rows.findIndex((line) => /^│ Pending +│$/.test(line)));
-		expect(rows[at + 1]).toMatch(/^│ {3}a +accept the row's ✦ triage proposal +│$/);
+		expect(rows[at + 1]).toMatch(/^│ {3}a +accept the row's ✦ proposal; on a group, a twice closes the whole group +│$/);
 	});
 });
 
@@ -1451,7 +1451,8 @@ describe("triage proposals", () => {
 	it("a accepts a same proposal as the links of the two rows, and Backspace unlinks them", () => {
 		const view = central(triaged([SAME, ANSWERED]));
 		const before = view.text(100);
-		view.key("a");
+		// P3.R1.Q1 heads a group with P1.R1.Q1, so the first a only arms it.
+		view.keys("a", "a");
 		expect(view.actions).toEqual([{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" }]);
 		expect(view.text(100)[0]).toMatch(/ 2 open · 1 linked ─╮$/);
 		expect(view.text(100)[2]).toMatch(/  ↺ P1\.R1\.Q1 +│$/);
@@ -1511,7 +1512,7 @@ describe("triage proposals", () => {
 	});
 
 	it("the key help lists a and n with the ✦ note under them and still fits the cap", () => {
-		const ACCEPT = /^│ {3}a +accept the row's ✦ triage proposal +│$/;
+		const ACCEPT = /^│ {3}a +accept the row's ✦ proposal; on a group, a twice closes the whole group +│$/;
 		const REJECT = /^│ {3}n +reject the row's ✦ triage proposal +│$/;
 		const NOTE = /^│ {3}✦ comes from \/replies triage: a model's proposal; nothing closes or links until you press a\. +│$/;
 		const wide = central(branch, { rows: 60 });
@@ -1576,5 +1577,169 @@ describe("triage proposals", () => {
 				}
 			}
 		}
+	});
+});
+
+describe("accepting a proposal on a repeat group", () => {
+	const BACKSPACE = "\x7f";
+	const ARMED = /^╰─ a close all 3 with this answer · esc cancel ─+╯$/;
+	const HINTS = /^╰─ enter answer · y yes · f format · t triage · \? help · esc close ─+╯$/;
+	/**
+	 * `branch` plus a third repeat of the old-branches ask (P4.R1.Q1, `d0d0d0d4.1`) and P5 `sí, borralas
+	 * todas` (entry 00000009): a group of three rows, the lone P1.R1.Q2 under it.
+	 */
+	const grouped = (proposals: unknown[], extra: () => SessionEntry[] = () => []) => [
+		...branch,
+		user("y ahora"),
+		assistant("¿Borro las ramas viejas?", { id: "d0d0d0d4" }),
+		user("sí, borralas todas"),
+		...extra(),
+		customEntry("reply-thread.triage", { model: "m", proposals }),
+	];
+	const ANSWERED = { kind: "answered", ask: "d0d0d0d4.1", prompt: "00000009", quote: "sí, borralas" };
+	const SAME = { kind: "same", ask: "d0d0d0d4.1", as: "a1b2c3d4.2" };
+
+	it("the first a on a group row unfolds the group and arms it, writes nothing, and the hints ask for a second a", () => {
+		const view = central(grouped([ANSWERED]));
+		view.key("a");
+		expect(view.actions).toEqual([]);
+		expect(view.closed()).toBeUndefined();
+		const rows = view.text(100);
+		expect(rows.slice(1, -1)).toEqual([
+			expect.stringMatching(/^│ ▌P4  y ahora +12:00 │$/),
+			expect.stringMatching(/^│ ›○ P4\.R1\.Q1  ¿Borro las ramas viejas\?  ≈ 2 similar +│$/),
+			expect.stringMatching(/^│ {14}✦ answered in P5: "sí, borralas" +│$/),
+			expect.stringMatching(/^│ {4}≈ P3\.R1\.Q1  ¿Borro las tres ramas viejas\? +│$/),
+			expect.stringMatching(/^│ {4}≈ P1\.R1\.Q1  Hay tres ramas viejas\. ¿Las borro\? +│$/),
+			expect.stringMatching(/^│ ▌P1  limpiá la rama +12:00 │$/),
+			expect.stringMatching(/^│  ○ P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/),
+		]);
+		expect(rows.at(-1)).toMatch(ARMED);
+		expect(view.text(80).at(-1)).toBe(`╰─ a close all 3 with this answer · esc cancel ${"─".repeat(32)}╯`);
+	});
+
+	it("counts the chain members of the group's rows in the armed hints", () => {
+		// P3.R1.Q1 continues P1.R1.Q2, so the group closes 4 asks.
+		const view = central(grouped([ANSWERED], () => [askEntry({ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.2" })]));
+		view.key("a");
+		expect(view.actions).toEqual([]);
+		expect(view.text(100).at(-1)).toMatch(/^╰─ a close all 4 with this answer · esc cancel ─+╯$/);
+	});
+
+	it("the second a closes the whole group with the answer as one step, and Backspace brings it all back", () => {
+		const view = central(grouped([ANSWERED]));
+		const before = view.text(100);
+		view.keys("a", "a");
+		expect(view.actions).toEqual([
+			{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" },
+			{ action: "link", ask: "d0d0d0d4.1", continues: "a1b2c3d4.1" },
+			{ action: "answer", ask: "d0d0d0d4.1", prompt: "00000009", text: "sí, borralas" },
+		]);
+		const rows = view.text(100);
+		expect(rows[0]).toMatch(/ 1 open · 0 linked ─╮$/);
+		expect(rows.slice(1, -1)).toEqual([
+			expect.stringMatching(/^│ ▌P1  limpiá la rama +12:00 │$/),
+			expect.stringMatching(/^│ ›○ P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/),
+		]);
+		expect(rows.at(-1)).toMatch(HINTS);
+		view.keys("\t", "\t");
+		const answered = view.text(100);
+		expect(answered).toContainEqual(expect.stringMatching(/^│ ›✓ P4\.R1\.Q1  ¿Borro las ramas viejas\?  ↺ P1\.R1\.Q1, P3\.R1\.Q1 +│$/));
+		expect(answered).toContainEqual(expect.stringMatching(/^│ {4}↳ P5  sí, borralas +│$/));
+		view.key("\t");
+		view.key(BACKSPACE);
+		expect(view.actions.slice(3)).toEqual([
+			{ action: "reopen", ask: "d0d0d0d4.1" },
+			{ action: "unlink", ask: "d0d0d0d4.1", continues: "a1b2c3d4.1" },
+			{ action: "unlink", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" },
+		]);
+		view.key("tui.select.up");
+		expect(view.text(100)).toEqual(before);
+		view.key(BACKSPACE);
+		expect(view.actions).toHaveLength(6);
+	});
+
+	it("the second a on a same proposal links the group and the other row as one star, and Backspace unlinks it", () => {
+		const view = central(grouped([SAME]));
+		const before = view.text(100);
+		expect(before[3]).toMatch(/✦ same as P1\.R1\.Q2  Necesito tu OK para pushear\./);
+		view.keys("a", "a");
+		expect(view.actions).toEqual([
+			{ action: "link", ask: "a1b2c3d4.2", continues: "a1b2c3d4.1" },
+			{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" },
+			{ action: "link", ask: "d0d0d0d4.1", continues: "a1b2c3d4.1" },
+		]);
+		const rows = view.text(120);
+		expect(rows[0]).toMatch(/ 1 open · 1 linked ─╮$/);
+		expect(rows.slice(1, -1)).toEqual([
+			expect.stringMatching(/^│ ▌P4  y ahora +12:00 │$/),
+			expect.stringMatching(/^│ ›○ P4\.R1\.Q1  ¿Borro las ramas viejas\?  ↺ P1\.R1\.Q1, P1\.R1\.Q2, P3\.R1\.Q1 +│$/),
+		]);
+		expect(rows.at(-1)).toMatch(HINTS);
+		view.key(BACKSPACE);
+		expect(view.actions.slice(3)).toEqual([
+			{ action: "unlink", ask: "d0d0d0d4.1", continues: "a1b2c3d4.1" },
+			{ action: "unlink", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" },
+			{ action: "unlink", ask: "a1b2c3d4.2", continues: "a1b2c3d4.1" },
+		]);
+		expect(view.text(100)).toEqual(before);
+	});
+
+	it("Esc while armed only disarms: the overlay stays open, the group unfolded, the hints back", () => {
+		const view = central(grouped([ANSWERED]));
+		view.key("a");
+		const armed = view.text(100);
+		view.key("tui.select.cancel");
+		expect(view.closed()).toBeUndefined();
+		expect(view.actions).toEqual([]);
+		const rows = view.text(100);
+		expect(rows.slice(0, -1)).toEqual(armed.slice(0, -1));
+		expect(rows.at(-1)).toMatch(HINTS);
+		// Disarmed, so the next a only arms again.
+		view.key("a");
+		expect(view.actions).toEqual([]);
+		expect(view.text(100).at(-1)).toMatch(ARMED);
+		view.key("tui.select.cancel");
+		view.key("tui.select.cancel");
+		expect(view.closed()).toEqual({ paste: undefined });
+	});
+
+	it("any other key disarms and does what it does today; moving the selection disarms", () => {
+		const view = central(grouped([ANSWERED]));
+		view.keys("a", "tui.select.down");
+		expect(view.text(100)[4]).toMatch(/^│ › {2}≈ P3\.R1\.Q1/);
+		expect(view.text(100).at(-1)).toMatch(HINTS);
+		view.keys("tui.select.up", "a");
+		expect(view.actions).toEqual([]);
+		expect(view.text(100).at(-1)).toMatch(ARMED);
+		view.key("x");
+		expect(view.actions).toEqual([{ action: "dismiss", ask: "d0d0d0d4.1" }]);
+		expect(view.text(100).at(-1)).toMatch(HINTS);
+		view.key(BACKSPACE);
+		view.keys("a", "?");
+		expect(view.text(100)[0]).toMatch(/^╭─ Keys /);
+		view.key("?");
+		expect(view.text(100).at(-1)).toMatch(HINTS);
+		view.key("a");
+		expect(view.actions).toHaveLength(2);
+		expect(view.text(100).at(-1)).toMatch(ARMED);
+	});
+
+	it("a on an expanded member acts at once on that member only", () => {
+		const view = central(grouped([{ kind: "answered", ask: "c9d0e1f2.1", prompt: "00000009", quote: "sí, borralas" }]));
+		view.keys(RIGHT, "tui.select.down", "a");
+		expect(view.actions).toEqual([{ action: "answer", ask: "c9d0e1f2.1", prompt: "00000009", text: "sí, borralas" }]);
+		expect(view.text(100)[0]).toMatch(/ 2 open · 0 linked ─╮$/);
+		expect(view.text(100).at(-1)).toMatch(HINTS);
+	});
+
+	it("n on a group row rejects its proposal at once, without unfolding or arming", () => {
+		const view = central(grouped([ANSWERED, SAME]));
+		view.key("n");
+		expect(view.actions).toEqual([{ action: "reject", ask: "d0d0d0d4.1", proposal: "answered:00000009" }]);
+		const rows = view.text(100);
+		expect(rows[3]).toMatch(/^│ {14}✦ same as P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/);
+		expect(rows[4]).toMatch(/^│ ▌P1 /);
+		expect(rows.at(-1)).toMatch(HINTS);
 	});
 });
