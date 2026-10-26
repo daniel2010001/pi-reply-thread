@@ -22,4 +22,20 @@ describe("demo session", () => {
 			["P3.R1.Q2", "¿Sumo la GPU al panel?", undefined],
 		]);
 	});
+
+	it("gives every reply the full usage Pi's footer adds up", () => {
+		const replies = entries.filter((entry) => (entry.message as { role?: string } | undefined)?.role === "assistant");
+		expect(replies).toHaveLength(4);
+		for (const entry of replies) {
+			expect((entry.message as { usage: unknown }).usage).toEqual({
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			});
+		}
+	});
 });
+

@@ -30,6 +30,16 @@ const SCRIPT: readonly (["user" | "assistant", string] | ["job", string, string]
 	["assistant", "El panel ya muestra la CPU.\n\n- ¿Borro los archivos temporales de las mediciones en /tmp?\n- ¿Sumo la GPU al panel?"],
 ];
 
+/** Pi's footer adds up every reply's usage, cost included, so a demo reply needs all of it. */
+const EMPTY_USAGE = {
+	input: 0,
+	output: 0,
+	cacheRead: 0,
+	cacheWrite: 0,
+	totalTokens: 0,
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
+
 export function demoEntries(cwd: string, start = Date.parse("2026-10-25T12:00:00.000Z")): DemoEntry[] {
 	let clock = start;
 	let parentId: string | null = null;
@@ -61,7 +71,7 @@ export function demoEntries(cwd: string, start = Date.parse("2026-10-25T12:00:00
 						api: "anthropic-messages",
 						provider: "demo",
 						model: "demo",
-						usage: {},
+						usage: EMPTY_USAGE,
 						stopReason: "stop",
 						timestamp: clock,
 					};
