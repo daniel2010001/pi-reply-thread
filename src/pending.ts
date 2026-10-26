@@ -226,3 +226,43 @@ export function buildAsks(entries: readonly SessionEntry[], threads = buildThrea
 	}
 	return { pending: rows, closed: done };
 }
+
+/**
+ * The open rows as repeat groups: the connected groups of `similarAsks` among the rows, a chain row by
+ * its newest text. Each group is oldest first, the groups ordered by their newest row; a row with no
+ * repeat is a group of one. Grouping links and closes nothing.
+ */
+export function similarGroups(pending: readonly PendingAsk[]): PendingAsk[][] {
+	const parent = pending.map((_, index) => index);
+	const find = (index: number): number => {
+		while (parent[index] !== index) index = parent[index];
+		return index;
+	};
+	for (const [left, one] of pending.entries()) {
+		for (let right = left + 1; right < pending.length; right += 1) {
+			if (similarAsks(one.text, pending[right].text)) parent[find(right)] = find(left);
+		}
+	}
+	const groups = new Map<number, PendingAsk[]>();
+	for (const [index, row] of pending.entries()) {
+		const key = find(index);
+		groups.set(key, [...(groups.get(key) ?? []), row]);
+	}
+	const newest = (group: PendingAsk[]) => Math.max(...group.map((row) => row.seq));
+	return [...groups.values()]
+		.map((group) => group.sort((a, b) => a.seq - b.seq))
+		.sort((a, b) => newest(a) - newest(b));
+}
+
+/**
+ * The links that make a group one chain: each row's oldest ask continues the group's oldest ask (the
+ * root), star-shaped. A lone ask continues itself, and a chain keeps its own links.
+ */
+export function groupLinks(group: readonly PendingAsk[]): AskAction[] {
+	const starts = group.map((row) => row.chain[0] ?? row);
+	const root = starts.reduce((oldest, ask) => (ask.seq < oldest.seq ? ask : oldest), starts[0]);
+	return starts
+		.filter((ask) => ask.id !== root.id)
+		.sort((a, b) => a.seq - b.seq)
+		.map((ask) => ({ action: "link", ask: ask.id, continues: root.id }));
+}

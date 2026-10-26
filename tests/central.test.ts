@@ -26,6 +26,9 @@ const KEYS: Record<string, string> = {
 	"tui.select.pageDown": "\x1b[6~",
 };
 
+const RIGHT = "\x1b[C";
+const LEFT = "\x1b[D";
+
 const keybindings = { matches: (data: string, action: string) => KEYS[action] === data } as unknown as KeybindingsManager;
 
 let theme: Theme;
@@ -111,7 +114,8 @@ describe("Pending tab", () => {
 			expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
 		}
 		const rows = view.text(120);
-		expect(rows[0]).toMatch(/^╭─ Pending ─+ 3 open · 0 linked ─╮$/);
+		// P3.R1.Q1 repeats P1.R1.Q1, and a repeat group counts once.
+		expect(rows[0]).toMatch(/^╭─ Pending ─+ 2 open · 0 linked ─╮$/);
 		expect(rows.at(-1)).toMatch(
 			/^╰─ enter answer · y yes · f format · \? help · esc close ─+╯$/,
 		);
@@ -135,18 +139,17 @@ describe("Pending tab", () => {
 		]);
 	});
 
-	it("groups the open asks under their prompt, newest prompt first, and suggests a repeat with ≈", () => {
+	it("groups the open asks under their prompt, newest prompt first, a repeat folded into the newer row with ≈", () => {
 		const { lines, text } = central(branch);
-		expect(text().slice(1, 6)).toEqual([
+		expect(text().slice(1, 5)).toEqual([
 			expect.stringMatching(/^│ ▌P3  revisá los tests +12:00 │$/),
-			expect.stringMatching(/^│ ›○ P3\.R1\.Q1  ¿Borro las tres ramas viejas\?  ≈ P1\.R1\.Q1 +│$/),
+			expect.stringMatching(/^│ ›○ P3\.R1\.Q1  ¿Borro las tres ramas viejas\?  ≈ 1 similar +│$/),
 			expect.stringMatching(/^│ ▌P1  limpiá la rama +12:00 │$/),
-			expect.stringMatching(/^│  ○ P1\.R1\.Q1  Hay tres ramas viejas\. ¿Las borro\? +│$/),
 			expect.stringMatching(/^│  ○ P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/),
 		]);
 		expect(lines()[1]).toContain(bg("userMessageBg"));
 		expect(lines()[2]).toContain(bg("selectedBg"));
-		expect(lines()[2]).toContain(`${fg("mdLink")}  ≈ P1.R1.Q1`);
+		expect(lines()[2]).toContain(`${fg("muted")}  ≈ 1 similar`);
 		expect(lines()[2]).toContain(`${fg("muted")}○`);
 		expect(lines()[4]).not.toContain(bg("selectedBg"));
 	});
@@ -189,7 +192,7 @@ describe("answering from the central", () => {
 		const view = central(branch);
 		view.keys(" ", "tui.select.down", " ", "y");
 		expect(view.closed()).toEqual({
-			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: Yes.\n\n> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nR: Yes.",
+			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: Yes.\n\n> P1.R1.Q2: Necesito tu OK para pushear.\nR: Yes.",
 		});
 	});
 
@@ -222,7 +225,7 @@ describe("answering from the central", () => {
 		view.key("f");
 		view.keys(" ", "tui.select.down", " ", "tui.select.confirm");
 		expect(view.closed()).toEqual({
-			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas? → \n> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro? → ",
+			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas? → \n> P1.R1.Q2: Necesito tu OK para pushear. → ",
 		});
 	});
 
@@ -233,7 +236,7 @@ describe("answering from the central", () => {
 		view.key("?");
 		view.keys(" ", "tui.select.down", " ", "y");
 		expect(view.closed()).toEqual({
-			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas? → Yes.\n> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro? → Yes.",
+			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas? → Yes.\n> P1.R1.Q2: Necesito tu OK para pushear. → Yes.",
 		});
 		expect(view.formats).toEqual([]);
 	});
@@ -288,12 +291,13 @@ describe("dismissing and linking", () => {
 		]);
 		view.key("u");
 		expect(view.actions.at(-1)).toEqual({ action: "unlink", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" });
-		expect(view.text(100)[0]).toMatch(/ 3 open · 0 linked ─╮$/);
+		expect(view.text(100)[0]).toMatch(/ 2 open · 0 linked ─╮$/);
+		expect(view.text(100)[2]).toMatch(/  ≈ 1 similar +│$/);
 	});
 
 	it("l with 3 marked links them as one chain, newest continues the next older, and clears the marks", () => {
 		const view = central(branch);
-		view.keys(" ", "tui.select.down", " ", "tui.select.down", " ");
+		view.keys(RIGHT, " ", "tui.select.down", " ", "tui.select.down", " ");
 		view.key("l");
 		expect(view.actions).toEqual([
 			{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.2" },
@@ -307,24 +311,25 @@ describe("dismissing and linking", () => {
 		expect(view.closed()).toEqual({ paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: " });
 	});
 
-	it("l with 2 marked links them even when no ≈ suggestion applies", () => {
+	it("l with 2 marked links them even when they are not similar", () => {
 		const view = central(branch);
-		view.keys("tui.select.down", "tui.select.down");
+		view.keys(RIGHT, "tui.select.down", "tui.select.down");
 		view.keys(" ", "tui.select.up", " ");
 		view.key("l");
 		expect(view.actions).toEqual([{ action: "link", ask: "a1b2c3d4.2", continues: "a1b2c3d4.1" }]);
 		const rows = view.text(100);
 		expect(rows[0]).toMatch(/ 2 open · 1 linked ─╮$/);
+		// The chain reads as its newest ask, which is not like P3.R1.Q1, so P3.R1.Q1 stands alone.
 		expect(rows.slice(1, 5)).toEqual([
 			expect.stringMatching(/^│ ▌P3  revisá los tests +12:00 │$/),
-			expect.stringMatching(/^│  ○ P3\.R1\.Q1  ¿Borro las tres ramas viejas\?  ≈ P1\.R1\.Q1 +│$/),
+			expect.stringMatching(/^│  ○ P3\.R1\.Q1  ¿Borro las tres ramas viejas\? +│$/),
 			expect.stringMatching(/^│ ▌P1  limpiá la rama +12:00 │$/),
 			expect.stringMatching(/^│ ›○ P1\.R1\.Q2  Necesito tu OK para pushear\.  ↺ P1\.R1\.Q1 +│$/),
 		]);
 		expect(rows.some((line) => line.includes("●"))).toBe(false);
 	});
 
-	it("l with 1 marked still links the selected ask to its ≈ suggestion and keeps the mark", () => {
+	it("l with 1 marked still links the selected row's similar ask and keeps the mark", () => {
 		const view = central(branch);
 		view.keys("tui.select.down", "tui.select.down", " ", "tui.select.up", "tui.select.up", "l");
 		expect(view.actions).toEqual([{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" }]);
@@ -342,10 +347,162 @@ describe("dismissing and linking", () => {
 		expect(view.text(100)[2]).toMatch(/  ↺ P1\.R1\.Q1, P1\.R1\.Q2 +│$/);
 	});
 
-	it("l and u do nothing on an ask without a suggestion or a chain", () => {
+	it("l and u do nothing on an ask without similar asks or a chain", () => {
 		const view = central(branch);
 		view.keys("tui.select.down", "tui.select.down", "l", "u");
 		expect(view.actions).toEqual([]);
+	});
+});
+
+describe("repeat groups", () => {
+	/** A copy of `branch` with a third repeat of the old-branches ask. */
+	const repeats = () => [...branch, user("y ahora"), assistant("¿Borro las ramas viejas?", { id: "d0d0d0d4" })];
+
+	it("shows three similar asks as one row on the newest with ≈ 2 similar, muted, counted once, and a lone ask without a count", () => {
+		const view = central(repeats());
+		const rows = view.text(100);
+		expect(rows[0]).toMatch(/^╭─ Pending ─+ 2 open · 0 linked ─╮$/);
+		expect(rows.slice(1, -1)).toEqual([
+			expect.stringMatching(/^│ ▌P4  y ahora +12:00 │$/),
+			expect.stringMatching(/^│ ›○ P4\.R1\.Q1  ¿Borro las ramas viejas\?  ≈ 2 similar +│$/),
+			expect.stringMatching(/^│ ▌P1  limpiá la rama +12:00 │$/),
+			expect.stringMatching(/^│  ○ P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/),
+		]);
+		expect(view.lines(100)[2]).toContain(`${fg("muted")}  ≈ 2 similar`);
+		expect(rows[4]).not.toContain("≈");
+	});
+
+	it("→ expands the older members as indented muted ≈ rows, newest first, and ← collapses from either row", () => {
+		const view = central(repeats());
+		view.key(RIGHT);
+		const rows = view.text(100);
+		expect(rows.slice(1, -1)).toEqual([
+			expect.stringMatching(/^│ ▌P4  y ahora +12:00 │$/),
+			expect.stringMatching(/^│ ›○ P4\.R1\.Q1  ¿Borro las ramas viejas\?  ≈ 2 similar +│$/),
+			expect.stringMatching(/^│ {4}≈ P3\.R1\.Q1  ¿Borro las tres ramas viejas\? +│$/),
+			expect.stringMatching(/^│ {4}≈ P1\.R1\.Q1  Hay tres ramas viejas\. ¿Las borro\? +│$/),
+			expect.stringMatching(/^│ ▌P1  limpiá la rama +12:00 │$/),
+			expect.stringMatching(/^│  ○ P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/),
+		]);
+		const member = view.lines(100)[3];
+		expect(member).toContain(`${fg("muted")}≈`);
+		expect(member).toContain(`${fg("muted")}P3.R1.Q1`);
+		view.keys("tui.select.down", "tui.select.down");
+		expect(view.text(100)[4]).toMatch(/^│ › {2}≈ P1\.R1\.Q1/);
+		expect(view.lines(100)[4]).toContain(bg("selectedBg"));
+		view.key(LEFT);
+		expect(view.text(100).slice(2, 4)).toEqual([
+			expect.stringMatching(/^│ ›○ P4\.R1\.Q1 .*≈ 2 similar +│$/),
+			expect.stringMatching(/^│ ▌P1 /),
+		]);
+		view.keys(RIGHT, LEFT);
+		expect(view.text(100)[3]).toMatch(/^│ ▌P1 /);
+		expect(view.actions).toEqual([]);
+		expect(view.closed()).toBeUndefined();
+	});
+
+	it("→ and ← do nothing on a lone ask", () => {
+		const view = central(repeats());
+		view.key("tui.select.down");
+		const before = view.text(100);
+		view.keys(RIGHT, LEFT);
+		expect(view.text(100)).toEqual(before);
+	});
+
+	it("answers, marks and dismisses an expanded member like any ask", () => {
+		const answer = central(repeats());
+		answer.keys(RIGHT, "tui.select.down", "tui.select.confirm");
+		expect(answer.closed()).toEqual({ paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: " });
+
+		const mark = central(repeats());
+		mark.keys(RIGHT, "tui.select.down", "tui.select.down", " ");
+		expect(mark.text(100)[4]).toMatch(/^│ › {2}● P1\.R1\.Q1/);
+		expect(mark.lines(100)[4]).toContain(`${fg("accent")}●`);
+		// The mark stays on a collapsed member, and the answer lists it in list order.
+		mark.keys(LEFT, " ", "y");
+		expect(mark.closed()).toEqual({
+			paste: "> P4.R1.Q1: ¿Borro las ramas viejas?\nR: Yes.\n\n> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nR: Yes.",
+		});
+
+		const dismiss = central(repeats());
+		dismiss.keys(RIGHT, "tui.select.down", "x");
+		expect(dismiss.actions).toEqual([{ action: "dismiss", ask: "c9d0e1f2.1" }]);
+		const rows = dismiss.text(100);
+		expect(rows[0]).toMatch(/ 2 open · 0 linked ─╮$/);
+		expect(rows.slice(2, 4)).toEqual([
+			expect.stringMatching(/^│ {2}○ P4\.R1\.Q1  ¿Borro las ramas viejas\?  ≈ 1 similar +│$/),
+			expect.stringMatching(/^│ › {2}≈ P1\.R1\.Q1  Hay tres ramas viejas\. ¿Las borro\? +│$/),
+		]);
+	});
+
+	it("closes nothing by itself: dismissing the group row leaves its members open, as the next row", () => {
+		const view = central(repeats());
+		view.key("x");
+		expect(view.actions).toEqual([{ action: "dismiss", ask: "d0d0d0d4.1" }]);
+		const rows = view.text(100);
+		expect(rows[0]).toMatch(/ 2 open · 0 linked ─╮$/);
+		expect(rows[2]).toMatch(/^│ ›○ P3\.R1\.Q1  ¿Borro las tres ramas viejas\?  ≈ 1 similar +│$/);
+	});
+
+	it("l on the group row links each other member to the oldest one, and the row becomes a chain row with ↺", () => {
+		const view = central(repeats());
+		view.key("l");
+		expect(view.actions).toEqual([
+			{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" },
+			{ action: "link", ask: "d0d0d0d4.1", continues: "a1b2c3d4.1" },
+		]);
+		const rows = view.text(100);
+		expect(rows[0]).toMatch(/ 2 open · 1 linked ─╮$/);
+		expect(rows[2]).toMatch(/^│ ›○ P4\.R1\.Q1  ¿Borro las ramas viejas\?  ↺ P1\.R1\.Q1, P3\.R1\.Q1 +│$/);
+		expect(rows.some((line) => line.includes("≈"))).toBe(false);
+		view.key("u");
+		expect(view.actions.at(-1)).toEqual({ action: "unlink", ask: "d0d0d0d4.1", continues: "a1b2c3d4.1" });
+	});
+
+	it("l on an expanded member links its whole group the same way", () => {
+		const view = central(repeats());
+		view.keys(RIGHT, "tui.select.down", "l");
+		expect(view.actions).toEqual([
+			{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" },
+			{ action: "link", ask: "d0d0d0d4.1", continues: "a1b2c3d4.1" },
+		]);
+	});
+
+	it("l keeps a chain marked by hand as it was built, a path, even when its asks are similar", () => {
+		const view = central(repeats());
+		view.keys(RIGHT, " ", "tui.select.down", " ", "tui.select.down", " ", "l");
+		expect(view.actions).toEqual([
+			{ action: "link", ask: "d0d0d0d4.1", continues: "c9d0e1f2.1" },
+			{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" },
+		]);
+		expect(view.text(100)[2]).toMatch(/^│ .○ P4\.R1\.Q1  ¿Borro las ramas viejas\?  ↺ P1\.R1\.Q1, P3\.R1\.Q1 +│$/);
+	});
+
+	it("fits the overlay cap on 8, 24 and 50 rows at exact widths with a group expanded", () => {
+		const many = () => {
+			resetIds();
+			return Array.from({ length: 30 }, (_, index) => [
+				user(`prompt ${index + 1}`),
+				assistant(`¿Primera tema${index + 1}?\n\n¿Borro las ramas viejas?`),
+			]).flat();
+		};
+		for (const rows of [8, 24, 50]) {
+			const cap = Math.min(rows - 4, Math.floor(rows * 0.9));
+			for (const width of [24, 80, 140]) {
+				const view = central(many(), { rows });
+				for (const press of ["", "tui.select.down", RIGHT, "tui.select.pageDown", "tui.select.pageDown", "tui.select.pageUp", LEFT]) {
+					if (press) view.key(press);
+					const lines = view.text(width);
+					expect(lines.length).toBeLessThanOrEqual(cap);
+					expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
+					expect(lines.at(-1)).toMatch(/^╰─/);
+					expect(lines.slice(1, -1).some((line) => line.includes("›"))).toBe(true);
+				}
+				const expanded = central(many(), { rows: 50 });
+				expanded.keys("tui.select.down", RIGHT);
+				expect(expanded.text(140).filter((line) => /│ {4}≈ P\d+\.R1\.Q2/.test(line)).length).toBeGreaterThan(0);
+			}
+		}
 	});
 });
 
@@ -354,7 +511,8 @@ describe("folding", () => {
 		resetIds();
 		return Array.from({ length: count }, (_, index) => [
 			user(`prompt ${index + 1}`),
-			assistant(`¿Pregunta ${index + 1} de ${count} ${"x".repeat(index)}?`),
+			// A word of its own per ask, so no two of them are similar.
+			assistant(`¿Pregunta ${index + 1} de ${count} tema${index + 1}?`),
 		]).flat();
 	};
 
@@ -386,7 +544,7 @@ describe("Pending on any screen", () => {
 		resetIds();
 		return Array.from({ length: 30 }, (_, index) => [
 			user(`prompt ${index + 1}`),
-			assistant(`¿Primera ${index + 1}?\n\n¿Segunda ${index + 1}?`),
+			assistant(`¿Primera tema${index + 1}?\n\n¿Segunda tema${index + 1}?`),
 		]).flat();
 	};
 
@@ -620,7 +778,7 @@ describe("Answered tab", () => {
 });
 
 describe("key help", () => {
-	const KEYS_LISTED = ["↑↓", "pgup/pgdn", "enter", "y", "f", "space", "x", "l", "u", "o", "tab", "?", "esc", "home/end", "q"];
+	const KEYS_LISTED = ["↑↓", "pgup/pgdn", "enter", "y", "f", "space", "x", "→", "←", "l", "u", "o", "tab", "?", "esc", "home/end", "q"];
 
 	it("? opens a card that lists every key, one per line, and ? or Esc closes it", () => {
 		const view = central(branch, { rows: 60 });
@@ -631,6 +789,8 @@ describe("key help", () => {
 		expect(rows.every((line) => visibleWidth(line) === 100)).toBe(true);
 		const keys = rows.slice(1, -1).flatMap((line) => /^│ {3}(\S+(?:, \S+)?) {2,}\S/.exec(line)?.[1].split(", ") ?? []);
 		for (const key of KEYS_LISTED) expect(keys).toContain(key);
+		expect(rows).toContainEqual(expect.stringMatching(/^│ {3}→, ← +expand or collapse the similar asks \(≈\) of a row +│$/));
+		expect(rows).toContainEqual(expect.stringMatching(/^│ {3}l +link the marked asks, or a row's similar asks to the oldest one +│$/));
 		expect(keys).not.toContain("s");
 		expect(rows).toContainEqual(expect.stringMatching(/^│ {3}y +answer Yes\. +│$/));
 		for (const section of ["Pending", "Replies", "Answered", "Every tab", "Reply viewer"]) {

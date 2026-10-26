@@ -19,7 +19,7 @@
   `/replies` and `Alt+R` open on a **Pending** tab while any ask is open (`Tab` switches to the
   index). `Enter` pastes `> <ID>: <ask>` quotes to answer the marked or selected asks, with an
   `R: ` line under each (`R: lines`, the default) or `→ ` on the quote line (`same line`); `f`
-  switches the format and the latest choice on the branch wins. `y` answers `Yes.`, `x` dismisses, `o` opens the reply, `l`/`u` link and unlink a suggested repeat; `l` with 2 or more
+  switches the format and the latest choice on the branch wins. `y` answers `Yes.`, `x` dismisses, `o` opens the reply, `l`/`u` link and unlink; `l` with 2 or more
   marked asks links them as one chain. An ask
   closes only when a later prompt cites its ID or it is dismissed; linked asks close together.
   Prompts beyond the 10 newest fold into `Older (N)`. `/replies pending` lists the open asks as
@@ -39,3 +39,8 @@
   number; `--reply-thread-asks all` (`gsh -- --reply-thread-asks all`) also tracks every question
   elsewhere in the reply. An unknown value works as `section` with a warning. The reply viewer notes
   the questions it leaves untracked, and the `?` card names the mode. README: "How asks are found".
+- Repeat groups: open asks that look alike (the same text, or 60% of their longer words in common,
+  directly or through another ask) show as one Pending row on the newest with `≈ N similar`, counted
+  once in the title. `→` expands the older ones under it, to answer, mark or dismiss one by one, and
+  `←` collapses them. `l` on the row links every other ask of the group to the oldest one, so it
+  becomes one chain. Nothing closes by itself.

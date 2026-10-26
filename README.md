@@ -176,15 +176,15 @@ Every ask gets two IDs, like a reply:
 - **Ordered**: `P<prompt>.R<reply>.Q<n>`, for example `P12.R1.Q2` is the second ask of `P12.R1`.
 - **Unique**: `<reply entry ID>.<n>`, for example `a1b2c3d4.2`.
 
-The **Pending** tab lists the asks still open, grouped under their prompt, newest prompt first:
+The **Pending** tab lists the asks still open, grouped under their prompt, newest prompt first. Asks
+that look alike show as one row, on the newest of them (see [Repeated asks](#repeated-asks)):
 
 ```
-╭─ Pending ────────────────────────────────────────────────────────── 4 open · 0 linked ─╮
+╭─ Pending ────────────────────────────────────────────────────────── 3 open · 0 linked ─╮
 │ ▌P2  look for something like this                                                12:01 │
 │ ›○ P2.R1.Q1  I found two options. Which one do you prefer?                             │
-│  ○ P2.R2.Q1  Should I delete the three old branches?  ≈ P1.R1.Q1                       │
+│  ○ P2.R2.Q1  Should I delete the three old branches?  ≈ 1 similar                      │
 │ ▌P1  clean up the old branches                                                   11:47 │
-│  ○ P1.R1.Q1  There are three old branches. Should I delete them?                       │
 │  ○ P1.R1.Q2  Needs your decision: push to main.                                        │
 ╰─ enter answer · y yes · f format · ? help · esc close ─────────────────────────────────╯
 ```
@@ -198,7 +198,8 @@ The **Pending** tab lists the asks still open, grouped under their prompt, newes
 | `f` | Switches the answer format between `R: lines` and `same line`; the `?` card shows the current one. |
 | `x` | Dismisses the marked asks, or the selected one. |
 | `o` | Opens the reply that asks it; `Esc` comes back. |
-| `l` / `u` | Links the marked asks (2 or more) as one chain, or the selected ask to its suggested repeat / unlinks the chain. |
+| `→` / `←` | Expands a row with `≈ N similar` to show its similar asks under it / collapses it again. |
+| `l` / `u` | Links the marked asks (2 or more) as one chain, or the selected row and its similar asks to the oldest of them / unlinks the chain. |
 | `Tab` | Goes to the next tab: Pending → Replies → Answered → Pending. |
 | `?` | Shows a card with every key of each tab; `?` or `Esc` hides it. |
 | `Esc` | Closes. |
@@ -231,11 +232,33 @@ An ask closes only explicitly:
   does. Gentle Agents wake messages do not count.
 - **Dismissed** with `x`.
 
-Asks often come back in a later reply. When an open ask looks like an older open one (the same text
-after lowercasing and dropping inline code and punctuation, or 60% of their words longer than 3
-letters in common), the row suggests it with `≈ <ordered ID>`. Nothing is linked until you press `l`.
-To link asks the suggestion missed, mark 2 or more with `Space` and press `l`: each one continues the
-next older one, and the marks clear.
+### Repeated asks
+
+Asks often come back in a later reply. Two open asks look alike when they have the same text after
+lowercasing and dropping inline code and punctuation, or 60% of their words longer than 3 letters in
+common. Asks that look alike, directly or through another one, form a **group**: the Pending tab shows
+it as one row, on its newest ask, with `≈ N similar` for the N older ones, and counts it once in the
+title. A linked chain joins a group by the text of its newest ask.
+
+```
+│ ›○ P4.R1.Q1  Should I delete the old branches?  ≈ 2 similar                            │
+```
+
+`→` expands the row: its similar asks show under it, newest first, as dimmed `≈` rows that you answer,
+mark (`●`) and dismiss like any ask. `←` collapses it again.
+
+```
+│  ○ P4.R1.Q1  Should I delete the old branches?  ≈ 2 similar                            │
+│ ›  ≈ P2.R1.Q1  Should I delete the three old branches?                                 │
+│    ≈ P1.R1.Q1  There are three old branches. Should I delete them?                     │
+```
+
+A group never closes by itself: answering or dismissing one of its asks closes only that one, and
+the next newest takes the row. Press `l` on the row (or one of its expanded asks) to link the group:
+every other ask continues the oldest one, and the row becomes a chain. To link asks that do not look
+alike, mark 2 or more with `Space` and press `l`: each one continues the next older one, and the marks
+clear.
+
 Linked asks form a chain, shown once on its newest ask with `↺ <older IDs>`; answering or dismissing
 any of them closes the whole chain. `u` unlinks the newest ask from the chain.
 
@@ -284,7 +307,7 @@ or dismissed. `Alt+R` opens the overlay.
 
 Every colour comes from the active Pi theme (frame `borderAccent`, prompts `userMessageBg`, selection
 `selectedBg`, jobs and closed asks `success`, workers `customMessageLabel`, asks `warning`, marks `accent`, chains
-`muted`, suggested repeats `mdLink`, scrollbar `scrollbarThumb`/`scrollbarTrack`), so the overlay
+`muted`, similar asks `muted`, scrollbar `scrollbarThumb`/`scrollbarTrack`), so the overlay
 follows your theme, including Gentle Shell's.
 
 ## Develop
@@ -302,8 +325,8 @@ pnpm demo                      # prints the file it wrote and the command to ope
 pi --session <file> -e ./extensions/reply-thread.ts
 ```
 
-Its Pending tab has two `≈` suggestions to link with `l`, and a `## …?` section title that is not an
-ask. Pi appends to the file when you use it, so write a new one for a fresh start.
+Its Pending tab has two rows with `≈ 1 similar` to expand with `→` and link with `l`, and a `## …?`
+section title that is not an ask. Pi appends to the file when you use it, so write a new one for a fresh start.
 
 ## License
 

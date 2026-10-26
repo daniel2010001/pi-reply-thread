@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { answerText } from "../src/format.ts";
-import { buildAsks, buildPending, normalizeAsk, questionIds, similarAsks } from "../src/pending.ts";
+import { buildAsks, buildPending, groupLinks, normalizeAsk, questionIds, similarAsks, similarGroups } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
 import { askEntry, assistant, resetIds, user, wake } from "./helpers.ts";
 
@@ -283,5 +283,120 @@ describe("buildAsks: answer text", () => {
 	it("a quote with nothing after it, or a prompt that only cites the ID: the prompt's first line", () => {
 		expect(answers("\n  dale con a1b2c3d4.2  \nsegunda línea")).toEqual([["P1.R1.Q2", "dale con a1b2c3d4.2"]]);
 		expect(answers("Contesto abajo.\n> P1.R1.Q1: ¿Uno?")).toEqual([["P1.R1.Q1", "Contesto abajo."]]);
+	});
+});
+
+describe("similarGroups: repeat groups", () => {
+	const repeats = () => [
+		user("a"),
+		assistant("¿Los borro?", { id: "fffffff1" }),
+		user("b"),
+		assistant("¿Pusheo la rama?", { id: "fffffff2" }),
+		user("c"),
+		assistant("**¿Los BORRO?**", { id: "fffffff3" }),
+		user("d"),
+		assistant("los borro?", { id: "fffffff4" }),
+	];
+	const groups = (entries: Parameters<typeof buildPending>[0]) =>
+		similarGroups(buildPending(entries)).map((group) => group.map((row) => row.ordinal));
+
+	it("folds three similar open asks into one group, oldest first, and leaves a lone ask alone", () => {
+		expect(groups(repeats())).toEqual([["P2.R1.Q1"], ["P1.R1.Q1", "P3.R1.Q1", "P4.R1.Q1"]]);
+	});
+
+	it("joins asks through a common repeat even when the two ends are not similar themselves", () => {
+		const entries = [
+			user("a"),
+			// {alfa, beta, gamma} and {alfa, beta, gamma, delta, omega}: 3/5; that and {gamma, delta, omega, sigma, kappa}: 3/7.
+			assistant("¿alfa beta gamma?", { id: "fffffff1" }),
+			user("b"),
+			assistant("¿alfa beta gamma delta omega?", { id: "fffffff2" }),
+			user("c"),
+			assistant("¿beta gamma delta omega?", { id: "fffffff3" }),
+		];
+		expect(similarAsks("¿alfa beta gamma?", "¿beta gamma delta omega?")).toBe(false);
+		expect(groups(entries)).toEqual([["P1.R1.Q1", "P2.R1.Q1", "P3.R1.Q1"]]);
+	});
+
+	it("counts a chain row by its newest text, and never groups a closed ask", () => {
+		const chained = [
+			...repeats(),
+			askEntry({ action: "link", ask: "fffffff2.1", continues: "fffffff1.1" }),
+		];
+		// The chain P1.R1.Q1 → P2.R1.Q1 reads as "¿Pusheo la rama?", its newest text.
+		expect(groups(chained)).toEqual([["P2.R1.Q1"], ["P3.R1.Q1", "P4.R1.Q1"]]);
+		const closed = [...repeats(), askEntry({ action: "dismiss", ask: "fffffff3.1" }), user("> P4.R1.Q1: los borro?\nR: no")];
+		expect(groups(closed)).toEqual([["P1.R1.Q1"], ["P2.R1.Q1"]]);
+	});
+
+	it("closes nothing by itself: grouping leaves every member open, and answering the newest leaves the rest", () => {
+		const state = buildAsks(repeats());
+		expect(state.closed).toEqual([]);
+		expect(state.pending).toHaveLength(4);
+		expect(groups([...repeats(), user("> P4.R1.Q1: los borro?\nR: sí")])).toEqual([["P2.R1.Q1"], ["P1.R1.Q1", "P3.R1.Q1"]]);
+	});
+});
+
+describe("groupLinks: linking a group to its root", () => {
+	const repeats = () => [
+		user("a"),
+		assistant("¿Los borro?", { id: "fffffff1" }),
+		user("b"),
+		assistant("**¿Los BORRO?**", { id: "fffffff2" }),
+		user("c"),
+		assistant("los borro?", { id: "fffffff3" }),
+	];
+
+	it("links every other member to the oldest one, star-shaped, and the group becomes one chain row", () => {
+		const [group] = similarGroups(buildPending(repeats()));
+		const links = groupLinks(group);
+		expect(links).toEqual([
+			{ action: "link", ask: "fffffff2.1", continues: "fffffff1.1" },
+			{ action: "link", ask: "fffffff3.1", continues: "fffffff1.1" },
+		]);
+		const rows = buildPending([...repeats(), ...links.map((link) => askEntry(link))]);
+		expect(rows.map((row) => [row.ordinal, row.chain.map((member) => member.ordinal), row.continues])).toEqual([
+			["P3.R1.Q1", ["P1.R1.Q1", "P2.R1.Q1"], "fffffff1.1"],
+		]);
+	});
+
+	it("links nothing for a lone ask", () => {
+		const [lone] = similarGroups(buildPending(repeats().slice(0, 2)));
+		expect(groupLinks(lone)).toEqual([]);
+	});
+
+	it("hangs a chain member by its oldest ask and keeps the chain as it was built", () => {
+		const entries = [
+			user("a"),
+			assistant("¿Los borro?", { id: "fffffff1" }),
+			user("b"),
+			assistant("¿Pusheo la rama?", { id: "fffffff2" }),
+			user("c"),
+			assistant("Ya. ¿Los borro?", { id: "fffffff3" }),
+			// A chain marked by hand (T19): P2.R1.Q1 → P1.R1.Q1 is not a repeat, P3.R1.Q1 → P2.R1.Q1 a path.
+			askEntry({ action: "link", ask: "fffffff2.1", continues: "fffffff1.1" }),
+			askEntry({ action: "link", ask: "fffffff3.1", continues: "fffffff2.1" }),
+			user("d"),
+			assistant("**¿Los BORRO?**", { id: "fffffff4" }),
+			user("e"),
+			assistant("los borro?", { id: "fffffff5" }),
+		];
+		const [group] = similarGroups(buildPending(entries));
+		expect(group.map((row) => row.ordinal)).toEqual(["P3.R1.Q1", "P4.R1.Q1", "P5.R1.Q1"]);
+		const links = groupLinks(group);
+		expect(links).toEqual([
+			{ action: "link", ask: "fffffff4.1", continues: "fffffff1.1" },
+			{ action: "link", ask: "fffffff5.1", continues: "fffffff1.1" },
+		]);
+		const [row] = buildPending([...entries, ...links.map((link) => askEntry(link))]);
+		expect(row.ordinal).toBe("P5.R1.Q1");
+		expect(row.chain.map((member) => member.ordinal)).toEqual(["P1.R1.Q1", "P2.R1.Q1", "P3.R1.Q1", "P4.R1.Q1"]);
+		// The hand-made path is unchanged: unlinking P3 from P2 still splits it there.
+		const split = buildPending([
+			...entries,
+			...links.map((link) => askEntry(link)),
+			askEntry({ action: "unlink", ask: "fffffff3.1", continues: "fffffff2.1" }),
+		]);
+		expect(split.map((ask) => ask.ordinal)).toEqual(["P3.R1.Q1", "P5.R1.Q1"]);
 	});
 });

@@ -12,7 +12,16 @@ import {
 	triggerText,
 } from "../src/format.ts";
 import { type AskMode, untrackedAsks } from "../src/asks.ts";
-import { type Ask, type AskAction, type AskState, type ClosedAsk, type PendingAsk, questionIds } from "../src/pending.ts";
+import {
+	type Ask,
+	type AskAction,
+	type AskState,
+	type ClosedAsk,
+	groupLinks,
+	type PendingAsk,
+	questionIds,
+	similarGroups,
+} from "../src/pending.ts";
 import type { Reply, Thread, Trigger, TriggerKind } from "../src/threads.ts";
 
 /** Pi cuts an overlay taller than its `maxHeight`, so the view sizes itself to the same cap. */
@@ -26,7 +35,7 @@ const MIN_BODY = 3;
 const TRIGGER_COLUMN = 24;
 /** Prompts with open asks shown before the rest fold into one `Older (N)` row. */
 const UNFOLDED_PROMPTS = 10;
-/** Narrowest ask text kept before a row drops its chain or suggestion. */
+/** Narrowest ask text kept before a row drops its chain or its count of similar asks. */
 const MIN_ASK = 8;
 
 /** Theme token of each trigger kind, so a glance tells a job from a worker. */
@@ -60,8 +69,15 @@ export interface Central {
 	mode: AskMode;
 }
 
-/** One line of the Pending tab: a prompt header, an open ask, or the folded older prompts. */
-type PendingRow = { kind: "prompt"; thread: Thread } | { kind: "ask"; ask: PendingAsk } | { kind: "older"; count: number };
+/**
+ * One line of the Pending tab: a prompt header, an open ask (the newest of its repeat group), an older
+ * member of an expanded group, or the folded older prompts.
+ */
+type PendingRow =
+	| { kind: "prompt"; thread: Thread }
+	| { kind: "ask"; ask: PendingAsk }
+	| { kind: "member"; ask: PendingAsk; head: PendingAsk }
+	| { kind: "older"; count: number };
 
 /** One line of the Answered tab: a prompt header, a closed ask, or the line under it that tells how it closed. */
 type AnsweredRow = { kind: "prompt"; thread: Thread } | { kind: "ask"; row: ClosedAsk } | { kind: "how"; row: ClosedAsk };
@@ -171,6 +187,12 @@ export class RepliesView implements Component {
 	private pendingSelected = 0;
 	private pendingTop = 0;
 	private askOrdinalWidth = 0;
+	/** The repeat group of each open row, oldest first, by the row's unique ID. */
+	private readonly groups = new Map<string, PendingAsk[]>();
+	/** Unique IDs of the group rows `→` expanded. */
+	private readonly unfolded = new Set<string>();
+	/** Every open row in list order, a group's older members right after it, folded ones too. */
+	private listOrder: PendingAsk[] = [];
 	private readonly marked = new Set<string>();
 	private expanded = false;
 	private format: AnswerFormat = "lines";
@@ -337,24 +359,40 @@ export class RepliesView implements Component {
 		return status;
 	}
 
-	/** Takes the open asks and rebuilds the rows: prompts newest first, the older ones folded. */
+	/**
+	 * Takes the open asks and rebuilds the rows: one row per repeat group, on its newest ask, under that
+	 * ask's prompt; prompts newest first, the older ones folded; an expanded group's older members under it.
+	 */
 	private setPending(pending: readonly PendingAsk[]): void {
 		this.pending = pending;
 		const ids = new Set(pending.map((ask) => ask.id));
 		for (const id of this.marked) if (!ids.has(id)) this.marked.delete(id);
 		this.askOrdinalWidth = Math.max(0, ...pending.map((ask) => ask.ordinal.length));
+		this.groups.clear();
+		const heads: PendingAsk[] = [];
+		for (const group of similarGroups(pending)) {
+			for (const ask of group) this.groups.set(ask.id, group);
+			heads.push(group.at(-1) as PendingAsk);
+		}
+		for (const id of this.unfolded) if (this.groups.get(id)?.at(-1)?.id !== id) this.unfolded.delete(id);
+		/** The older members of a group row, newest first, like the prompts. */
+		const members = (head: PendingAsk) => (this.groups.get(head.id) ?? []).slice(0, -1).reverse();
 
 		const groups = new Map<number, { thread: Thread; asks: PendingAsk[] }>();
-		for (const ask of pending) {
+		for (const ask of heads) {
 			const group = groups.get(ask.thread.prompt) ?? { thread: ask.thread, asks: [] };
 			group.asks.push(ask);
 			groups.set(ask.thread.prompt, group);
 		}
 		const ordered = [...groups.values()].sort((a, b) => b.thread.prompt - a.thread.prompt);
+		this.listOrder = ordered.flatMap(({ asks }) => asks.flatMap((head) => [head, ...members(head)]));
 		const shown = this.expanded ? ordered : ordered.slice(0, UNFOLDED_PROMPTS);
 		const rows: PendingRow[] = shown.flatMap(({ thread, asks }) => [
 			{ kind: "prompt" as const, thread },
-			...asks.map((ask) => ({ kind: "ask" as const, ask })),
+			...asks.flatMap((head) => [
+				{ kind: "ask" as const, ask: head },
+				...(this.unfolded.has(head.id) ? members(head).map((ask) => ({ kind: "member" as const, ask, head })) : []),
+			]),
 		]);
 		const folded = ordered.slice(shown.length).reduce((count, group) => count + group.asks.length, 0);
 		if (folded) rows.push({ kind: "older", count: folded });
@@ -386,12 +424,12 @@ export class RepliesView implements Component {
 
 	private selectedAsk(): PendingAsk | undefined {
 		const row = this.pendingRows[this.pendingSelected];
-		return row?.kind === "ask" ? row.ask : undefined;
+		return row?.kind === "ask" || row?.kind === "member" ? row.ask : undefined;
 	}
 
-	/** The marked asks in list order, or the selected one when none is marked. */
+	/** The marked asks in list order, collapsed members too, or the selected one when none is marked. */
 	private targets(): PendingAsk[] {
-		const marked = this.pendingRows.flatMap((row) => (row.kind === "ask" && this.marked.has(row.ask.id) ? [row.ask] : []));
+		const marked = this.listOrder.filter((ask) => this.marked.has(ask.id));
 		if (marked.length) return marked;
 		const ask = this.selectedAsk();
 		return ask ? [ask] : [];
@@ -447,8 +485,17 @@ export class RepliesView implements Component {
 			const members = this.markedChain();
 			this.act(members.slice(1).map((older, index) => ({ action: "link", ask: members[index].id, continues: older.id })));
 			this.marked.clear();
-		} else if (matchesKey(data, "l") && ask?.suggestion) {
-			this.act([{ action: "link", ask: ask.id, continues: ask.suggestion.id }]);
+		} else if (matchesKey(data, "l") && ask && (this.groups.get(ask.id)?.length ?? 0) > 1) {
+			// The whole repeat group, from the group row or one of its members, hangs from its oldest ask.
+			this.act(groupLinks(this.groups.get(ask.id) as PendingAsk[]));
+		} else if (matchesKey(data, "right") && row?.kind === "ask" && (this.groups.get(row.ask.id)?.length ?? 0) > 1) {
+			this.unfolded.add(row.ask.id);
+			this.setPending(this.pending);
+		} else if (matchesKey(data, "left") && (row?.kind === "ask" || row?.kind === "member")) {
+			const head = row.kind === "member" ? row.head : row.ask;
+			if (!this.unfolded.delete(head.id)) return false;
+			this.setPending(this.pending);
+			this.selectPending(this.pendingRows.findIndex((next) => next.kind === "ask" && next.ask.id === head.id));
 		} else if (matchesKey(data, "u") && ask?.continues) {
 			this.act([{ action: "unlink", ask: ask.id, continues: ask.continues }]);
 		} else if (matchesKey(data, "o") && ask) this.open(ask.reply, ask.thread);
@@ -618,19 +665,23 @@ export class RepliesView implements Component {
 
 	// ── Pending view ─────────────────────────────────────────────────────────
 
-	/** `›○ P13.R1.Q1  <ask>  ↺ <older members>` or `  ≈ <suggested repeat>`; the ask is cut first. */
+	/**
+	 * `  ↺ <older members>  ≈ N similar`, as much of it as leaves the ask `MIN_ASK` columns of `room`: the
+	 * chain goes first, then the count of similar asks.
+	 */
+	private askSuffix(ask: PendingAsk, room: number, similar: number): string {
+		const chain = ask.chain.length ? `  ↺ ${ask.chain.map((member) => member.ordinal).join(", ")}` : "";
+		const count = similar ? `  ≈ ${similar} similar` : "";
+		for (const suffix of [chain + count, count, ""]) if (room - visibleWidth(suffix) >= MIN_ASK) return suffix;
+		return "";
+	}
+
+	/** `›○ P13.R1.Q1  <ask>  ↺ <older members>  ≈ N similar`; the ask is cut first. */
 	private askLine(ask: PendingAsk, selected: boolean, width: number): string {
 		const theme = this.theme;
 		const ordinal = ask.ordinal.padEnd(this.askOrdinalWidth);
 		const room = width - 3 - ordinal.length - 2;
-		let suffix = "";
-		let color: ThemeColor = "muted";
-		if (ask.chain.length) suffix = `  ↺ ${ask.chain.map((member) => member.ordinal).join(", ")}`;
-		else if (ask.suggestion) {
-			suffix = `  ≈ ${ask.suggestion.ordinal}`;
-			color = "mdLink";
-		}
-		if (room - visibleWidth(suffix) < MIN_ASK) suffix = "";
+		const suffix = this.askSuffix(ask, room, (this.groups.get(ask.id)?.length ?? 1) - 1);
 		const text = truncateToWidth(ask.text, Math.max(0, room - visibleWidth(suffix)), "…");
 		const content = [
 			selected ? theme.fg("accent", "›") : " ",
@@ -639,7 +690,27 @@ export class RepliesView implements Component {
 			theme.fg("accent", selected ? theme.bold(ordinal) : ordinal),
 			"  ",
 			theme.fg("text", text),
-			suffix ? theme.fg(color, suffix) : "",
+			suffix ? theme.fg("muted", suffix) : "",
+		].join("");
+		const line = fit(content, width);
+		return selected ? theme.bg("selectedBg", line) : line;
+	}
+
+	/** `›  ≈ P12.R1.Q1  <ask>  ↺ <older members>`, muted, under its group row; `●` replaces `≈` when marked. */
+	private memberLine(ask: PendingAsk, selected: boolean, width: number): string {
+		const theme = this.theme;
+		const ordinal = ask.ordinal.padEnd(this.askOrdinalWidth);
+		const room = width - 5 - ordinal.length - 2;
+		const suffix = this.askSuffix(ask, room, 0);
+		const text = truncateToWidth(ask.text, Math.max(0, room - visibleWidth(suffix)), "…");
+		const content = [
+			selected ? theme.fg("accent", "›") : " ",
+			"  ",
+			this.marked.has(ask.id) ? theme.fg("accent", "●") : theme.fg("muted", "≈"),
+			" ",
+			theme.fg("muted", selected ? theme.bold(ordinal) : ordinal),
+			"  ",
+			theme.fg("muted", text + suffix),
 		].join("");
 		const line = fit(content, width);
 		return selected ? theme.bg("selectedBg", line) : line;
@@ -664,8 +735,10 @@ export class RepliesView implements Component {
 
 	private renderPending(width: number): string[] {
 		const theme = this.theme;
-		const linked = this.pending.filter((ask) => ask.chain.length).length;
-		const top = this.top("Pending", this.pending.length ? `${this.pending.length} open · ${linked} linked` : "", width);
+		// A repeat group counts once, as the row it shows on.
+		const heads = this.pending.filter((ask) => this.groups.get(ask.id)?.at(-1) === ask);
+		const linked = heads.filter((ask) => ask.chain.length).length;
+		const top = this.top("Pending", heads.length ? `${heads.length} open · ${linked} linked` : "", width);
 		if (!this.pendingRows.length) {
 			return [
 				top,
@@ -703,7 +776,9 @@ export class RepliesView implements Component {
 					? this.threadLine(row.thread, content)
 					: row.kind === "ask"
 						? this.askLine(row.ask, selected, content)
-						: this.olderLine(row.count, selected, content);
+						: row.kind === "member"
+							? this.memberLine(row.ask, selected, content)
+							: this.olderLine(row.count, selected, content);
 			return this.line(text, width, cells[offset]);
 		});
 		return [top, ...visible, this.bottom(this.pendingHints(), "", width)];
@@ -793,7 +868,8 @@ export class RepliesView implements Component {
 			["f", `switch the answer format; now ${FORMAT_NAMES[this.format]}`],
 			["space", "mark or unmark an ask"],
 			["x", "dismiss the marked or selected asks"],
-			["l", "link the marked asks, or the ask to its ≈ repeat"],
+			["→, ←", "expand or collapse the similar asks (≈) of a row"],
+			["l", "link the marked asks, or a row's similar asks to the oldest one"],
 			["u", "unlink the ask from its chain"],
 			["o", "open the reply that asks it"],
 			"Replies",
