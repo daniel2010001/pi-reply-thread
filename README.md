@@ -42,6 +42,20 @@ pi -e ./extensions/reply-thread.ts
 gsh -- -e ./extensions/reply-thread.ts   # Gentle Shell
 ```
 
+### Update from 0.1.x
+
+While the package is below 1.0, `pi update` stays within the installed minor version: Pi records
+the package as `^0.1.0`, and that range never reaches 0.2.0. Move to the latest release once with npm,
+in Pi's package directory; your settings do not change:
+
+```sh
+cd ~/.pi/agent/npm && npm install pi-reply-thread@latest
+cd ~/.gentle-shell/agent/npm && npm install pi-reply-thread@latest   # Gentle Shell
+```
+
+If you set `PI_CODING_AGENT_DIR`, use its `npm` directory instead. Then `/reload`, or start a new
+session. Check the version with `npm ls pi-reply-thread` in the same directory.
+
 ## Use
 
 | Command | What it does |
