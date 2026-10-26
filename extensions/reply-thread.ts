@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";
-import { formatIndex, formatPending, formatReplyPlain, widgetLines } from "../src/format.ts";
+import { answerFormat, FORMAT_ENTRY, formatIndex, formatPending, formatReplyPlain, widgetLines } from "../src/format.ts";
 import { findReply, noMatchMessage } from "../src/lookup.ts";
 import { ASK_ENTRY, type AskAction, buildPending } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
@@ -66,6 +66,8 @@ async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string)
 		pending,
 		act: (action) => act(pi, ctx, action),
 		tab: pendingTab ? "pending" : undefined,
+		format: answerFormat(branch),
+		setFormat: (format) => pi.appendEntry(FORMAT_ENTRY, { format }),
 	};
 	const paste = await ctx.ui.custom<string | undefined>(
 		(tui, theme, keybindings, done) => new RepliesView(tui, theme, keybindings, threads, done, reply, central),

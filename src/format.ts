@@ -1,3 +1,4 @@
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { QuestionId } from "./pending.ts";
 import type { Reply, Thread, Trigger } from "./threads.ts";
 
@@ -97,14 +98,34 @@ export function formatPending(pending: readonly QuestionId[]): string {
 	return pending.map((ask) => `${ask.ordinal}  ${ask.id}  ${ask.text}`).join("\n");
 }
 
+/** Custom entry type of the answer format chosen in the central, written with `pi.appendEntry`. */
+export const FORMAT_ENTRY = "reply-thread.format";
+
+/** How the central pastes an answer: an `R: ` line under each quote, or `→ ` on the quote line. */
+export type AnswerFormat = "lines" | "inline";
+
+/** The name the Pending hints show for each format. */
+export const FORMAT_NAMES: Record<AnswerFormat, string> = { lines: "R: lines", inline: "same line" };
+
+/** The latest format chosen on the branch; `lines` when none was. */
+export function answerFormat(entries: readonly SessionEntry[]): AnswerFormat {
+	for (const entry of [...entries].reverse()) {
+		if (entry.type !== "custom" || entry.customType !== FORMAT_ENTRY) continue;
+		const format = (entry.data as { format?: unknown } | undefined)?.format;
+		if (format === "lines" || format === "inline") return format;
+	}
+	return "lines";
+}
+
 /**
  * What the central pastes to answer asks: a quote per ask with its ordered ID, so sending it closes
- * the ask, then an empty line to write under. A yes adds `Sí.` after each quote.
+ * the ask, and room for the answer right after it, with no trailing newline so the cursor waits there.
+ * `lines` puts `R: ` under each quote and an empty line between asks; `inline` puts `→ ` on the quote
+ * line, one ask per line. A yes writes `Sí.` as the answer.
  */
-export function answerText(asks: readonly QuestionId[], yes = false): string {
-	const lines = asks.flatMap((ask) => {
-		const quote = `> ${ask.ordinal}: ${ask.text}`;
-		return yes ? [quote, "Sí."] : [quote];
-	});
-	return `${lines.join("\n")}\n\n`;
+export function answerText(asks: readonly QuestionId[], yes = false, format: AnswerFormat = "lines"): string {
+	const answer = yes ? "Sí." : "";
+	const quotes = asks.map((ask) => `> ${ask.ordinal}: ${ask.text}`);
+	if (format === "inline") return quotes.map((quote) => `${quote} → ${answer}`).join("\n");
+	return quotes.map((quote) => `${quote}\nR: ${answer}`).join("\n\n");
 }

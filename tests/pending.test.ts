@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { answerText } from "../src/format.ts";
 import { buildPending, normalizeAsk, questionIds, similarAsks } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
 import { askEntry, assistant, resetIds, user, wake } from "./helpers.ts";
@@ -32,6 +33,16 @@ describe("buildPending: answered", () => {
 	it("closes an ask when a later prompt cites its ordered ID, in any case", () => {
 		expect(open([...base(), user("> P1.R1.Q1: ¿Uno?\nSí.")]).map(([id]) => id)).toEqual(["P1.R1.Q2"]);
 		expect(open([...base(), user("p1.r1.q2 dale")]).map(([id]) => id)).toEqual(["P1.R1.Q1"]);
+	});
+
+	it("closes the asks a prompt pasted in either answer format cites", () => {
+		const asks = buildPending(base());
+		for (const format of ["lines", "inline"] as const) {
+			for (const yes of [false, true]) {
+				expect(open([...base(), user(`${answerText(asks, yes, format)}dale`)])).toEqual([]);
+				expect(open([...base(), user(answerText(asks.slice(1), yes, format))]).map(([id]) => id)).toEqual(["P1.R1.Q1"]);
+			}
+		}
 	});
 
 	it("closes an ask when a later prompt cites its unique ID", () => {

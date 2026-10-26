@@ -111,20 +111,41 @@ The **Pending** tab lists the asks still open, grouped under their prompt, newes
 │ ▌P1  limpiá las ramas viejas                                                     11:47 │
 │  ○ P1.R1.Q1  Hay tres ramas viejas. ¿Las borro?                                        │
 │  ○ P1.R1.Q2  Necesito tu OK para pushear main.                                         │
-╰─ enter answer · s sí · space mark · x dismiss · o open · tab replies · esc close ──────╯
+╰─ enter answer · s sí · f R: lines · space mark · x dismiss · o open · tab replies · … ─╯
 ```
 
 | Key | What it does |
 |---|---|
 | `↑`/`↓`, `PgUp`/`PgDn` | Move. |
 | `Space` | Marks or unmarks an ask (`●`; an unmarked ask shows `○`). |
-| `Enter` | Answers the marked asks, or the selected one: closes the overlay and pastes `> P2.R1.Q1: <ask>` per ask into the editor, then an empty line to write under. |
-| `s` | The same, with `Sí.` after each quote. |
+| `Enter` | Answers the marked asks, or the selected one: closes the overlay and pastes a `> P2.R1.Q1: <ask>` quote per ask into the editor, with room for your answer (see below). |
+| `s` | The same, with `Sí.` as the answer. |
+| `f` | Switches the answer format between `R: lines` and `same line`; the hint shows the current one. |
 | `x` | Dismisses the marked asks, or the selected one. |
 | `o` | Opens the reply that asks it; `Esc` comes back. |
 | `l` / `u` | Links the suggested repeat / unlinks the chain. |
 | `Tab` | Switches to **Replies**. |
 | `Esc` | Closes. |
+
+The pasted text ends where you type, with no trailing newline. In the `R: lines` format (the default)
+each quote gets an `R: ` line under it and the asks are apart by an empty line:
+
+```
+> P2.R1.Q1: Encontré dos opciones. ¿Cuál preferís?
+R: 
+
+> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?
+R: Sí.
+```
+
+In the `same line` format the answer follows the quote after `→ `, one ask per line:
+
+```
+> P2.R1.Q1: Encontré dos opciones. ¿Cuál preferís? → 
+> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro? → Sí.
+```
+
+The format is stored as a `reply-thread.format` custom entry on the branch; the latest one wins.
 
 An ask closes only explicitly:
 

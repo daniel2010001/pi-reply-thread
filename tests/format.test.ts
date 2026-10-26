@@ -1,8 +1,11 @@
 process.env.TZ = "UTC";
 
 import { describe, expect, it } from "vitest";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
+	answerFormat,
 	answerText,
+	FORMAT_ENTRY,
 	formatIndex,
 	formatPending,
 	formatReplyPlain,
@@ -198,12 +201,41 @@ describe("answerText", () => {
 		{ ordinal: "P13.R2.Q1", id: "e5f6a7b8.1", text: "¿Pusheo?" },
 	];
 
-	it("quotes each ask with its ordered ID, then leaves an empty line", () => {
-		expect(answerText(asks.slice(0, 1))).toBe("> P13.R1.Q1: ¿Los borro?\n\n");
-		expect(answerText(asks)).toBe("> P13.R1.Q1: ¿Los borro?\n> P13.R2.Q1: ¿Pusheo?\n\n");
+	it("lines (the default): a quote per ask, an `R: ` line under it, asks apart by an empty line, no trailing newline", () => {
+		expect(answerText(asks.slice(0, 1))).toBe("> P13.R1.Q1: ¿Los borro?\nR: ");
+		expect(answerText(asks)).toBe("> P13.R1.Q1: ¿Los borro?\nR: \n\n> P13.R2.Q1: ¿Pusheo?\nR: ");
+		expect(answerText(asks, false, "lines")).toBe(answerText(asks));
 	});
 
-	it("adds Sí. after each quote line for a yes", () => {
-		expect(answerText(asks, true)).toBe("> P13.R1.Q1: ¿Los borro?\nSí.\n> P13.R2.Q1: ¿Pusheo?\nSí.\n\n");
+	it("lines with a yes: `R: Sí.` under each quote", () => {
+		expect(answerText(asks.slice(0, 1), true)).toBe("> P13.R1.Q1: ¿Los borro?\nR: Sí.");
+		expect(answerText(asks, true, "lines")).toBe("> P13.R1.Q1: ¿Los borro?\nR: Sí.\n\n> P13.R2.Q1: ¿Pusheo?\nR: Sí.");
+	});
+
+	it("inline: the answer on the quote line after `→ `, one ask per line, no trailing newline", () => {
+		expect(answerText(asks.slice(0, 1), false, "inline")).toBe("> P13.R1.Q1: ¿Los borro? → ");
+		expect(answerText(asks, false, "inline")).toBe("> P13.R1.Q1: ¿Los borro? → \n> P13.R2.Q1: ¿Pusheo? → ");
+	});
+
+	it("inline with a yes: `→ Sí.` on each quote line", () => {
+		expect(answerText(asks.slice(0, 1), true, "inline")).toBe("> P13.R1.Q1: ¿Los borro? → Sí.");
+		expect(answerText(asks, true, "inline")).toBe("> P13.R1.Q1: ¿Los borro? → Sí.\n> P13.R2.Q1: ¿Pusheo? → Sí.");
+	});
+});
+
+describe("answerFormat", () => {
+	const entry = (data: unknown, customType = FORMAT_ENTRY) =>
+		({ type: "custom", id: "f0000001", parentId: null, timestamp: "", customType, data }) as SessionEntry;
+
+	it("defaults to lines and takes the latest reply-thread.format entry on the branch", () => {
+		expect(answerFormat([])).toBe("lines");
+		expect(answerFormat([entry({ format: "inline" })])).toBe("inline");
+		expect(answerFormat([entry({ format: "inline" }), entry({ format: "lines" })])).toBe("lines");
+		expect(answerFormat([entry({ format: "lines" }), entry({ format: "inline" })])).toBe("inline");
+	});
+
+	it("ignores other entries and unknown formats", () => {
+		expect(answerFormat([entry({ format: "inline" }), entry({ format: "table" })])).toBe("inline");
+		expect(answerFormat([entry({ format: "inline" }, "reply-thread.ask")])).toBe("lines");
 	});
 });

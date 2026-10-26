@@ -11,6 +11,7 @@ import {
 import { stripTerminalSequences, type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { RepliesView } from "../extensions/replies-view.ts";
+import type { AnswerFormat } from "../src/format.ts";
 import { type AskAction, buildPending } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
 import { askEntry, assistant, resetIds, user } from "./helpers.ts";
@@ -43,9 +44,13 @@ function bg(token: ThemeBg): string {
 }
 
 /** The central over a branch; `act` appends the entry as Pi would and rebuilds from the branch. */
-function central(entries: SessionEntry[], options: { rows?: number; tab?: "pending" | "replies" } = {}) {
+function central(
+	entries: SessionEntry[],
+	options: { rows?: number; tab?: "pending" | "replies"; format?: AnswerFormat } = {},
+) {
 	let closed: { paste?: string } | undefined;
 	const actions: AskAction[] = [];
+	const formats: AnswerFormat[] = [];
 	const tui = { terminal: { rows: options.rows ?? 30 }, requestRender: () => {} } as unknown as TUI;
 	const act = (action: AskAction) => {
 		actions.push(action);
@@ -59,7 +64,13 @@ function central(entries: SessionEntry[], options: { rows?: number; tab?: "pendi
 		buildThreads(entries),
 		(paste?: string) => (closed = { paste }),
 		undefined,
-		{ pending: buildPending(entries), act, tab: options.tab },
+		{
+			pending: buildPending(entries),
+			act,
+			tab: options.tab,
+			format: options.format ?? "lines",
+			setFormat: (format) => formats.push(format),
+		},
 	);
 	const key = (data: string) => component.handleInput(KEYS[data] ?? data);
 	return {
@@ -70,6 +81,7 @@ function central(entries: SessionEntry[], options: { rows?: number; tab?: "pendi
 		text: (width = 80) => component.render(width).map(stripTerminalSequences),
 		closed: () => closed,
 		actions,
+		formats,
 	};
 }
 
@@ -94,9 +106,11 @@ describe("Pending tab", () => {
 			const lines = view.text(width);
 			expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
 		}
-		const rows = view.text(100);
+		const rows = view.text(120);
 		expect(rows[0]).toMatch(/^╭─ Pending ─+ 3 open · 0 linked ─╮$/);
-		expect(rows.at(-1)).toMatch(/^╰─ enter answer · s sí · space mark · x dismiss · l link · o open · tab replies · esc close ─+╯$/);
+		expect(rows.at(-1)).toMatch(
+			/^╰─ enter answer · s sí · f R: lines · space mark · x dismiss · l link · o open · tab replies · esc close ─+╯$/,
+		);
 		view.key("\t");
 		expect(view.text()[0]).toMatch(/^╭─ Replies ─+ 3 prompts · 3 replies ─╮$/);
 		expect(view.text().at(-1)).toMatch(/^╰─ ↑↓ move · enter open · esc close ─+╯$/);
@@ -148,10 +162,10 @@ describe("Pending tab", () => {
 });
 
 describe("answering from the central", () => {
-	it("Enter closes and pastes the selected ask as a quote, then an empty line", () => {
+	it("Enter closes and pastes the selected ask as a quote with an R: line under it", () => {
 		const view = central(branch);
 		view.key("tui.select.confirm");
-		expect(view.closed()).toEqual({ paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\n\n" });
+		expect(view.closed()).toEqual({ paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: " });
 	});
 
 	it("space marks asks with ● and Enter pastes every marked ask in list order", () => {
@@ -161,16 +175,51 @@ describe("answering from the central", () => {
 		expect(view.lines()[2]).toContain(`${fg("accent")}●`);
 		view.keys("tui.select.up", " ", " ", "tui.select.confirm");
 		expect(view.closed()).toEqual({
-			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\n> P1.R1.Q2: Necesito tu OK para pushear.\n\n",
+			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: \n\n> P1.R1.Q2: Necesito tu OK para pushear.\nR: ",
 		});
 	});
 
-	it("s pastes the same quotes with Sí. after each one", () => {
+	it("s pastes the same quotes with R: Sí. under each one", () => {
 		const view = central(branch);
 		view.keys(" ", "tui.select.down", " ", "s");
 		expect(view.closed()).toEqual({
-			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\nSí.\n> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nSí.\n\n",
+			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: Sí.\n\n> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nR: Sí.",
 		});
+	});
+
+	it("f toggles the answer format, saves each choice, and the hint names the current one", () => {
+		const view = central(branch);
+		expect(view.text(120).at(-1)).toContain(" · f R: lines · ");
+		view.key("f");
+		expect(view.formats).toEqual(["inline"]);
+		expect(view.text(120).at(-1)).toContain(" · f same line · ");
+		expect(view.closed()).toBeUndefined();
+		view.key("f");
+		expect(view.formats).toEqual(["inline", "lines"]);
+		expect(view.text(120).at(-1)).toContain(" · f R: lines · ");
+		view.key("f");
+		view.keys(" ", "tui.select.down", " ", "tui.select.confirm");
+		expect(view.closed()).toEqual({
+			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas? → \n> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro? → ",
+		});
+	});
+
+	it("answers in the format it opens with, and s adds → Sí. on the same line", () => {
+		const view = central(branch, { format: "inline" });
+		expect(view.text(120).at(-1)).toContain(" · f same line · ");
+		view.keys(" ", "tui.select.down", " ", "s");
+		expect(view.closed()).toEqual({
+			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas? → Sí.\n> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro? → Sí.",
+		});
+		expect(view.formats).toEqual([]);
+	});
+
+	it("cuts the hint line with … at 80 and 100 columns, keeping the frame width", () => {
+		const view = central(branch);
+		expect(view.text(80).at(-1)).toBe("╰─ enter answer · s sí · f R: lines · space mark · x dismiss · l link · o op… ─╯");
+		expect(view.text(100).at(-1)).toBe(
+			"╰─ enter answer · s sí · f R: lines · space mark · x dismiss · l link · o open · tab replies · e… ─╯",
+		);
 	});
 
 	it("o opens the reply of the ask and Esc goes back to Pending", () => {

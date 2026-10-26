@@ -110,7 +110,12 @@ export function wake(nonce?: string): SessionEntry[] {
 	return [identity, message];
 }
 
-/** A `reply-thread.ask` entry, as `pi.appendEntry` stores it: on the branch, outside the model context. */
+/** A custom entry, as `pi.appendEntry` stores it: on the branch, outside the model context. */
+export function customEntry(customType: string, data: unknown): SessionEntry {
+	return { ...base(), type: "custom", customType, data } as SessionEntry;
+}
+
+/** A `reply-thread.ask` entry: a dismiss, reopen, link or unlink from the central. */
 export function askEntry(data: Record<string, string>): SessionEntry {
-	return { ...base(), type: "custom", customType: "reply-thread.ask", data } as SessionEntry;
+	return customEntry("reply-thread.ask", data);
 }

@@ -14,8 +14,9 @@
   the open asks with the newest one (`⚠ N pending · newest: <ID> <ask> · alt+r`).
 - Pending central: every ask has an ordered ID (`P12.R1.Q2`) and a unique ID (`a1b2c3d4.2`);
   `/replies` and `Alt+R` open on a **Pending** tab while any ask is open (`Tab` switches to the
-  index). `Enter` pastes `> <ID>: <ask>` quotes to answer the marked or selected asks, `s` adds
-  `Sí.`, `x` dismisses, `o` opens the reply, `l`/`u` link and unlink a suggested repeat. An ask
+  index). `Enter` pastes `> <ID>: <ask>` quotes to answer the marked or selected asks, with an
+  `R: ` line under each (`R: lines`, the default) or `→ ` on the quote line (`same line`); `f`
+  switches the format and the latest choice on the branch wins. `s` answers `Sí.`, `x` dismisses, `o` opens the reply, `l`/`u` link and unlink a suggested repeat. An ask
   closes only when a later prompt cites its ID or it is dismissed; linked asks close together.
   Prompts beyond the 10 newest fold into `Older (N)`. `/replies pending` lists the open asks as
   plain text, and `/replies <question ID>` opens the reply that asks it.

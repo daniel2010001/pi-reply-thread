@@ -1,7 +1,16 @@
 import type { KeybindingsManager, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { type Component, Markdown, matchesKey, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { answerText, formatTime, type IndexRow, indexRows, promptLine, triggerText } from "../src/format.ts";
+import {
+	type AnswerFormat,
+	answerText,
+	FORMAT_NAMES,
+	formatTime,
+	type IndexRow,
+	indexRows,
+	promptLine,
+	triggerText,
+} from "../src/format.ts";
 import type { AskAction, PendingAsk } from "../src/pending.ts";
 import type { Reply, Thread, Trigger, TriggerKind } from "../src/threads.ts";
 
@@ -40,6 +49,10 @@ export interface Central {
 	act(action: AskAction): readonly PendingAsk[];
 	/** The tab to open on; Pending when any ask is open, else Replies. */
 	tab?: Tab;
+	/** How answers are pasted when the central opens. */
+	format: AnswerFormat;
+	/** Saves the format `f` switches to on the branch. */
+	setFormat(format: AnswerFormat): void;
 }
 
 /** One line of the Pending tab: a prompt header, an open ask, or the folded older prompts. */
@@ -71,7 +84,8 @@ function scrollCells(theme: Theme, total: number, height: number, top: number): 
 
 /**
  * The thread list with a full-reply viewer: Enter opens a reply, Esc goes back, Esc on the list closes.
- * With a central, a Pending tab lists the open asks; Enter or `s` closes it with the text to paste.
+ * With a central, a Pending tab lists the open asks; Enter or `s` closes it with the text to paste,
+ * in the format `f` toggles.
  */
 export class RepliesView implements Component {
 	private readonly tui: TUI;
@@ -99,6 +113,7 @@ export class RepliesView implements Component {
 	private askOrdinalWidth = 0;
 	private readonly marked = new Set<string>();
 	private expanded = false;
+	private format: AnswerFormat = "lines";
 
 	constructor(
 		tui: TUI,
@@ -115,7 +130,10 @@ export class RepliesView implements Component {
 		this.done = done;
 		this.central = central;
 		this.tab = central ? (central.tab ?? (central.pending.length ? "pending" : "replies")) : "replies";
-		if (central) this.setPending(central.pending);
+		if (central) {
+			this.format = central.format;
+			this.setPending(central.pending);
+		}
 		this.rows = indexRows(threads);
 		const replies = this.rows.flatMap((row) => (row.reply ? [row.reply] : []));
 		const prompts = threads.filter((thread) => thread.prompt > 0).length;
@@ -295,8 +313,11 @@ export class RepliesView implements Component {
 		} else if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "s")) {
 			const targets = this.targets();
 			if (!targets.length) return false;
-			this.done(answerText(targets, matchesKey(data, "s")));
+			this.done(answerText(targets, matchesKey(data, "s"), this.format));
 			return false;
+		} else if (matchesKey(data, "f")) {
+			this.format = this.format === "lines" ? "inline" : "lines";
+			(this.central as Central).setFormat(this.format);
 		} else if (matchesKey(data, "space") && ask) {
 			if (!this.marked.delete(ask.id)) this.marked.add(ask.id);
 		} else if (matchesKey(data, "x")) {
@@ -482,6 +503,7 @@ export class RepliesView implements Component {
 		return [
 			["enter", "answer"],
 			["s", "sí"],
+			["f", FORMAT_NAMES[this.format]],
 			["space", "mark"],
 			["x", "dismiss"],
 			...(ask?.suggestion ? ([["l", "link"]] as Hint[]) : []),

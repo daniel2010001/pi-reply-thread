@@ -4,7 +4,7 @@ import type { ExtensionAPI, KeybindingsManager, SessionEntry } from "@earendil-w
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it } from "vitest";
 import replyThread from "../extensions/reply-thread.ts";
-import { askEntry, assistant, jobNotice, resetIds, user } from "./helpers.ts";
+import { askEntry, assistant, customEntry, jobNotice, resetIds, user } from "./helpers.ts";
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
 type WidgetFactory = (tui: unknown, theme: unknown) => { render(width: number): string[] };
@@ -30,7 +30,7 @@ function load() {
 		on: (event: string, handler: Handler) => handlers.set(event, [...(handlers.get(event) ?? []), handler]),
 		appendEntry: (customType: string, data: unknown) => {
 			appended.push([customType, data]);
-			branch.push(askEntry(data as Record<string, string>));
+			branch.push(customEntry(customType, data));
 		},
 	};
 	replyThread(pi as unknown as ExtensionAPI);
@@ -250,9 +250,35 @@ describe("pending central", () => {
 		const { commands, appended } = load();
 		const { ctx, pastes, notices } = fakeCtx(branch, "tui", ["tui.select.confirm"]);
 		await commands.get("replies")!.handler("", ctx);
-		expect(pastes).toEqual(["> P1.R1.Q1: Encontré dos opciones. ¿Cuál preferís?\n\n"]);
+		expect(pastes).toEqual(["> P1.R1.Q1: Encontré dos opciones. ¿Cuál preferís?\nR: "]);
 		expect(appended).toEqual([]);
 		expect(notices).toEqual([]);
+	});
+
+	it("f writes the format as a reply-thread.format entry and the paste follows it", async () => {
+		const { commands, appended } = load();
+		const { ctx, pastes } = fakeCtx(branch, "tui", ["f", "tui.select.confirm"]);
+		await commands.get("replies")!.handler("", ctx);
+		expect(appended).toEqual([["reply-thread.format", { format: "inline" }]]);
+		expect(pastes).toEqual(["> P1.R1.Q1: Encontré dos opciones. ¿Cuál preferís? → "]);
+		const again = fakeCtx(branch, "tui", ["f", "tui.select.confirm"]);
+		await commands.get("replies")!.handler("", again.ctx);
+		expect(appended.at(-1)).toEqual(["reply-thread.format", { format: "lines" }]);
+		expect(again.pastes).toEqual(["> P1.R1.Q1: Encontré dos opciones. ¿Cuál preferís?\nR: "]);
+	});
+
+	it("answers in the latest format on the branch, lines by default", async () => {
+		const { commands } = load();
+		const answer = async () => {
+			const { ctx, pastes, seen } = fakeCtx(branch, "tui", ["tui.select.confirm"]);
+			await commands.get("replies")!.handler("", ctx);
+			return { paste: pastes[0], hints: seen[0].at(-1) };
+		};
+		expect(await answer()).toEqual({ paste: expect.stringMatching(/\nR: $/), hints: expect.stringContaining("f R: lines") });
+		branch.push(customEntry("reply-thread.format", { format: "inline" }));
+		expect(await answer()).toEqual({ paste: expect.stringMatching(/ → $/), hints: expect.stringContaining("f same line") });
+		branch.push(customEntry("reply-thread.format", { format: "lines" }));
+		expect((await answer()).paste).toMatch(/\nR: $/);
 	});
 
 	it("does not paste when the central closes on Esc", async () => {
