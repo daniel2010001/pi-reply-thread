@@ -1,6 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { answerText } from "../src/format.ts";
-import { buildAsks, buildPending, groupLinks, normalizeAsk, questionIds, similarAsks, similarGroups } from "../src/pending.ts";
+import {
+	buildAsks,
+	buildPending,
+	groupLinks,
+	looksAnsweredBy,
+	normalizeAsk,
+	questionIds,
+	similarAsks,
+	similarGroups,
+} from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
 import { askEntry, assistant, resetIds, user, wake } from "./helpers.ts";
 
@@ -505,5 +514,111 @@ describe("buildAsks: a quote closes the ask whose text it carries", () => {
 			["P1.R1.Q3", `> P1.R1.Q3: ${MERGE}`],
 			["P1.R1.Q4", "yes"],
 		]);
+	});
+});
+
+describe("buildAsks: looks answered", () => {
+	const OLD = "Should I delete the old branches?";
+	const THREE = "Should I delete the three old branches?";
+	const NOW = "Should I delete the old branches now?";
+	/** The open asks with the ordinal of the closed ask each one looks like. */
+	const marks = (entries: Parameters<typeof buildAsks>[0]) =>
+		buildAsks(entries).pending.map((row) => [row.ordinal, row.looksAnswered?.ordinal]);
+
+	it("names an older answered ask that an open ask looks like, and leaves the open ask open", () => {
+		const entries = [
+			user("clean up"),
+			assistant(OLD, { id: "a1a1a1a1" }),
+			user(`> P1.R1.Q1: ${OLD}\nR: yes`),
+			assistant(THREE, { id: "b2b2b2b2" }),
+		];
+		expect(similarAsks(OLD, THREE)).toBe(true);
+		expect(marks(entries)).toEqual([["P2.R1.Q1", "P1.R1.Q1"]]);
+		expect(buildAsks(entries).closed.map((row) => row.ask.ordinal)).toEqual(["P1.R1.Q1"]);
+	});
+
+	it("names an older dismissed ask too", () => {
+		const entries = [
+			user("clean up"),
+			assistant(OLD, { id: "a1a1a1a1" }),
+			askEntry({ action: "dismiss", ask: "a1a1a1a1.1" }),
+			user("go on"),
+			assistant(THREE, { id: "b2b2b2b2" }),
+		];
+		expect(marks(entries)).toEqual([["P2.R1.Q1", "P1.R1.Q1"]]);
+	});
+
+	it("does not count a closed ask newer than the open one", () => {
+		const entries = [
+			user("clean up"),
+			assistant(OLD, { id: "a1a1a1a1" }),
+			user("go on"),
+			assistant(THREE, { id: "b2b2b2b2" }),
+			askEntry({ action: "dismiss", ask: "b2b2b2b2.1" }),
+		];
+		expect(marks(entries)).toEqual([["P1.R1.Q1", undefined]]);
+	});
+
+	it("names the newest of several older closed asks it looks like", () => {
+		const entries = [
+			user("clean up"),
+			assistant(OLD, { id: "a1a1a1a1" }),
+			user(`> P1.R1.Q1: ${OLD}\nR: yes`),
+			assistant(THREE, { id: "b2b2b2b2" }),
+			askEntry({ action: "dismiss", ask: "b2b2b2b2.1" }),
+			user("and now"),
+			assistant(NOW, { id: "c3c3c3c3" }),
+		];
+		expect(marks(entries)).toEqual([["P3.R1.Q1", "P2.R1.Q1"]]);
+	});
+
+	it("names nothing when no closed ask looks like it", () => {
+		const entries = [
+			user("clean up"),
+			assistant("Should I push to main?", { id: "a1a1a1a1" }),
+			askEntry({ action: "dismiss", ask: "a1a1a1a1.1" }),
+			user("go on"),
+			assistant(OLD, { id: "b2b2b2b2" }),
+		];
+		expect(marks(entries)).toEqual([["P2.R1.Q1", undefined]]);
+	});
+
+	it("counts the older members of a closed chain, and reads a chain row by its newest text", () => {
+		const entries = [
+			user("clean up"),
+			assistant(`${OLD}\n\nShould I push to main?`, { id: "a1a1a1a1" }),
+			askEntry({ action: "link", ask: "a1a1a1a1.2", continues: "a1a1a1a1.1" }),
+			askEntry({ action: "dismiss", ask: "a1a1a1a1.2" }),
+			user("go on"),
+			assistant(`Should I push to origin?\n\n${NOW}`, { id: "b2b2b2b2" }),
+			askEntry({ action: "link", ask: "b2b2b2b2.2", continues: "b2b2b2b2.1" }),
+		];
+		// The closed chain shows on P1.R1.Q2, the push, but its older member P1.R1.Q1 is the one alike.
+		expect(buildAsks(entries).closed.map((row) => row.ask.ordinal)).toEqual(["P1.R1.Q2"]);
+		expect(marks(entries)).toEqual([["P2.R1.Q2", "P1.R1.Q1"]]);
+	});
+
+	it("gives a group the newest mark of any member, a hidden one too", () => {
+		const RELEASE = "Should I merge the release branch?";
+		const TODAY = "Should I merge the release branch today?";
+		const NOTES = "Today, should I merge the release notes?";
+		const entries = [
+			user("release"),
+			assistant(RELEASE, { id: "a1a1a1a1" }),
+			askEntry({ action: "dismiss", ask: "a1a1a1a1.1" }),
+			user("go on"),
+			assistant(TODAY, { id: "b2b2b2b2" }),
+			user("and"),
+			assistant(NOTES, { id: "c3c3c3c3" }),
+		];
+		expect(similarAsks(NOTES, RELEASE)).toBe(false);
+		expect(marks(entries)).toEqual([
+			["P2.R1.Q1", "P1.R1.Q1"],
+			["P3.R1.Q1", undefined],
+		]);
+		const [group] = similarGroups(buildAsks(entries).pending);
+		expect(group.map((row) => row.ordinal)).toEqual(["P2.R1.Q1", "P3.R1.Q1"]);
+		expect(looksAnsweredBy(group)?.ordinal).toBe("P1.R1.Q1");
+		expect(looksAnsweredBy(group.slice(1))).toBeUndefined();
 	});
 });

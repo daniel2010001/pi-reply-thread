@@ -18,6 +18,7 @@ import {
 	type AskState,
 	type ClosedAsk,
 	groupLinks,
+	looksAnsweredBy,
 	type PendingAsk,
 	questionIds,
 	similarGroups,
@@ -35,7 +36,7 @@ const MIN_BODY = 3;
 const TRIGGER_COLUMN = 24;
 /** Prompts with open asks shown before the rest fold into one `Older (N)` row. */
 const UNFOLDED_PROMPTS = 10;
-/** Narrowest ask text kept before a row drops its chain or its count of similar asks. */
+/** Narrowest ask text kept before a row drops its chain, its count of similar asks or its `✓?` mark. */
 const MIN_ASK = 8;
 
 /** Theme token of each trigger kind, so a glance tells a job from a worker. */
@@ -666,22 +667,28 @@ export class RepliesView implements Component {
 	// ── Pending view ─────────────────────────────────────────────────────────
 
 	/**
-	 * `  ↺ <older members>  ≈ N similar`, as much of it as leaves the ask `MIN_ASK` columns of `room`: the
-	 * chain goes first, then the count of similar asks.
+	 * `  ↺ <older members>  ≈ N similar · ✓? like <closed ask>`, as much of it as leaves the ask `MIN_ASK`
+	 * columns of `room`: the chain goes first, then the count of similar asks, then the mark.
 	 */
-	private askSuffix(ask: PendingAsk, room: number, similar: number): string {
+	private askSuffix(ask: PendingAsk, room: number, similar: number, like?: Ask): string {
 		const chain = ask.chain.length ? `  ↺ ${ask.chain.map((member) => member.ordinal).join(", ")}` : "";
 		const count = similar ? `  ≈ ${similar} similar` : "";
-		for (const suffix of [chain + count, count, ""]) if (room - visibleWidth(suffix) >= MIN_ASK) return suffix;
+		const mark = like ? `✓? like ${like.ordinal}` : "";
+		const join = (head: string) => (head && mark ? `${head} · ${mark}` : head || (mark && `  ${mark}`));
+		for (const suffix of [join(chain + count), join(count), join(""), ""]) {
+			if (room - visibleWidth(suffix) >= MIN_ASK) return suffix;
+		}
 		return "";
 	}
 
-	/** `›○ P13.R1.Q1  <ask>  ↺ <older members>  ≈ N similar`; the ask is cut first. */
+	/** `›○ P13.R1.Q1  <ask>  ↺ <older members>  ≈ N similar · ✓? like <closed ask>`; the ask is cut first. */
 	private askLine(ask: PendingAsk, selected: boolean, width: number): string {
 		const theme = this.theme;
 		const ordinal = ask.ordinal.padEnd(this.askOrdinalWidth);
 		const room = width - 3 - ordinal.length - 2;
-		const suffix = this.askSuffix(ask, room, (this.groups.get(ask.id)?.length ?? 1) - 1);
+		const group = this.groups.get(ask.id) ?? [ask];
+		// A group row looks answered when any of its asks does, hidden ones too.
+		const suffix = this.askSuffix(ask, room, group.length - 1, looksAnsweredBy(group));
 		const text = truncateToWidth(ask.text, Math.max(0, room - visibleWidth(suffix)), "…");
 		const content = [
 			selected ? theme.fg("accent", "›") : " ",
@@ -696,12 +703,15 @@ export class RepliesView implements Component {
 		return selected ? theme.bg("selectedBg", line) : line;
 	}
 
-	/** `›  ≈ P12.R1.Q1  <ask>  ↺ <older members>`, muted, under its group row; `●` replaces `≈` when marked. */
+	/**
+	 * `›  ≈ P12.R1.Q1  <ask>  ↺ <older members> · ✓? like <closed ask>`, muted, under its group row, with its
+	 * own mark; `●` replaces `≈` when marked.
+	 */
 	private memberLine(ask: PendingAsk, selected: boolean, width: number): string {
 		const theme = this.theme;
 		const ordinal = ask.ordinal.padEnd(this.askOrdinalWidth);
 		const room = width - 5 - ordinal.length - 2;
-		const suffix = this.askSuffix(ask, room, 0);
+		const suffix = this.askSuffix(ask, room, 0, ask.looksAnswered);
 		const text = truncateToWidth(ask.text, Math.max(0, room - visibleWidth(suffix)), "…");
 		const content = [
 			selected ? theme.fg("accent", "›") : " ",
@@ -874,6 +884,7 @@ export class RepliesView implements Component {
 			["→, ←", "expand or collapse the similar asks (≈) of a row"],
 			["l", "link the marked asks, or a row's similar asks to the oldest one"],
 			{ note: "A group row answers only its newest ask; press l first to close the whole group together.", indent: true },
+			{ note: "✓? like <ID>: looks answered by that closed ask; it stays open until you answer it or press x.", indent: true },
 			["u", "unlink the ask from its chain"],
 			["o", "open the reply that asks it"],
 			"Replies",

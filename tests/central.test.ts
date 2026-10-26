@@ -430,7 +430,8 @@ describe("repeat groups", () => {
 		const rows = dismiss.text(100);
 		expect(rows[0]).toMatch(/ 2 open · 0 linked ─╮$/);
 		expect(rows.slice(2, 4)).toEqual([
-			expect.stringMatching(/^│ {2}○ P4\.R1\.Q1  ¿Borro las ramas viejas\?  ≈ 1 similar +│$/),
+			// P4.R1.Q1 now looks like the dismissed P3.R1.Q1, older than it.
+			expect.stringMatching(/^│ {2}○ P4\.R1\.Q1  ¿Borro las ramas viejas\?  ≈ 1 similar · ✓\? like P3\.R1\.Q1 +│$/),
 			expect.stringMatching(/^│ › {2}≈ P1\.R1\.Q1  Hay tres ramas viejas\. ¿Las borro\? +│$/),
 		]);
 	});
@@ -503,6 +504,115 @@ describe("repeat groups", () => {
 				expect(expanded.text(140).filter((line) => /│ {4}≈ P\d+\.R1\.Q2/.test(line)).length).toBeGreaterThan(0);
 			}
 		}
+	});
+});
+
+describe("looks answered", () => {
+	const OLD = "Should I delete the old branches?";
+	/** An answered ask, then `asks` in a later reply. */
+	const answered = (...asks: string[]) => {
+		resetIds();
+		return [
+			user("clean up"),
+			assistant(OLD, { id: "a1a1a1a1" }),
+			user(`> P1.R1.Q1: ${OLD}\nR: yes`),
+			assistant(asks.join("\n\n"), { id: "b2b2b2b2" }),
+		];
+	};
+
+	it("marks an open ask like an older answered one with ✓? like <ordinal>, muted, and closes nothing", () => {
+		const view = central(answered("Should I delete the three old branches?"));
+		const rows = view.text(100);
+		expect(rows[0]).toMatch(/^╭─ Pending ─+ 1 open · 0 linked ─╮$/);
+		expect(rows[2]).toMatch(/^│ ›○ P2\.R1\.Q1  Should I delete the three old branches\?  ✓\? like P1\.R1\.Q1 +│$/);
+		expect(view.lines(100)[2]).toContain(`${fg("muted")}  ✓? like P1.R1.Q1`);
+		expect(view.actions).toEqual([]);
+		view.key("x");
+		expect(view.actions).toEqual([{ action: "dismiss", ask: "b2b2b2b2.1" }]);
+		expect(view.text(100)[1]).toMatch(/^│ Nothing waits on you\. +│$/);
+	});
+
+	it("marks an open ask like an older dismissed one, and nothing when no closed ask is alike or the closed one is newer", () => {
+		resetIds();
+		const dismissed = central([
+			user("clean up"),
+			assistant(OLD, { id: "a1a1a1a1" }),
+			askEntry({ action: "dismiss", ask: "a1a1a1a1.1" }),
+			user("go on"),
+			assistant("Should I delete the three old branches?\n\nShould I push to main?", { id: "b2b2b2b2" }),
+		]).text(100);
+		expect(dismissed[2]).toMatch(/^│ ›○ P2\.R1\.Q1  Should I delete the three old branches\?  ✓\? like P1\.R1\.Q1 +│$/);
+		expect(dismissed[3]).toMatch(/^│  ○ P2\.R1\.Q2  Should I push to main\? +│$/);
+		resetIds();
+		const newer = central([
+			user("clean up"),
+			assistant(OLD, { id: "a1a1a1a1" }),
+			user("go on"),
+			assistant("Should I delete the three old branches?", { id: "b2b2b2b2" }),
+			askEntry({ action: "dismiss", ask: "b2b2b2b2.1" }),
+		]).text(100);
+		expect(newer[2]).toMatch(/^│ ›○ P1\.R1\.Q1  Should I delete the old branches\? +│$/);
+		expect(newer.some((line) => line.includes("✓?"))).toBe(false);
+	});
+
+	it("names the newest closed ask alike", () => {
+		resetIds();
+		const rows = central([
+			user("clean up"),
+			assistant(OLD, { id: "a1a1a1a1" }),
+			user(`> P1.R1.Q1: ${OLD}\nR: yes`),
+			assistant("Should I delete the three old branches?", { id: "b2b2b2b2" }),
+			askEntry({ action: "dismiss", ask: "b2b2b2b2.1" }),
+			user("and now"),
+			assistant("Should I delete the old branches now?", { id: "c3c3c3c3" }),
+		]).text(100);
+		expect(rows[2]).toMatch(/^│ ›○ P3\.R1\.Q1  Should I delete the old branches now\?  ✓\? like P2\.R1\.Q1 +│$/);
+	});
+
+	it("marks a group row when a hidden member is alike, after ≈ N similar, and an expanded member shows its own mark", () => {
+		resetIds();
+		const view = central([
+			user("release"),
+			assistant("Should I merge the release branch?", { id: "a1a1a1a1" }),
+			askEntry({ action: "dismiss", ask: "a1a1a1a1.1" }),
+			user("go on"),
+			assistant("Should I merge the release branch today?", { id: "b2b2b2b2" }),
+			user("and"),
+			assistant("Today, should I merge the release notes?", { id: "c3c3c3c3" }),
+		]);
+		expect(view.text(100)[2]).toMatch(
+			/^│ ›○ P3\.R1\.Q1  Today, should I merge the release notes\?  ≈ 1 similar · ✓\? like P1\.R1\.Q1 +│$/,
+		);
+		expect(view.lines(100)[2]).toContain(`${fg("muted")}  ≈ 1 similar · ✓? like P1.R1.Q1`);
+		view.key(RIGHT);
+		expect(view.text(100)[3]).toMatch(/^│ {4}≈ P2\.R1\.Q1  Should I merge the release branch today\?  ✓\? like P1\.R1\.Q1 +│$/);
+	});
+
+	it("keeps ↺ and the mark on a chain row, joined by ·", () => {
+		const entries = answered("Should I push to origin?", "Should I delete the old branches now?");
+		entries.push(askEntry({ action: "link", ask: "b2b2b2b2.2", continues: "b2b2b2b2.1" }));
+		const rows = central(entries).text(100);
+		expect(rows[2]).toMatch(/^│ ›○ P2\.R1\.Q2  Should I delete the old branches now\?  ↺ P2\.R1\.Q1 · ✓\? like P1\.R1\.Q1 +│$/);
+	});
+
+	it("cuts a long ask before the suffixes, which stay whole", () => {
+		const entries = answered(`Should I delete the old branches ${"a ".repeat(30)}now?`);
+		entries.push(user("x"), assistant("Should I delete the old branches, all of them?", { id: "c3c3c3c3" }));
+		const view = central(entries);
+		const row = view.text(70)[2];
+		expect(visibleWidth(row)).toBe(70);
+		expect(row).toMatch(/^│ ›○ P3\.R1\.Q1  Should I delete.*…  ≈ 1 similar · ✓\? like P1\.R1\.Q1 │$/);
+		const lone = central(answered(`Should I delete the old branches ${"a ".repeat(30)}now?`)).text(50)[2];
+		expect(visibleWidth(lone)).toBe(50);
+		expect(lone).toMatch(/^│ ›○ P2\.R1\.Q1  Should I.*…  ✓\? like P1\.R1\.Q1 │$/);
+	});
+
+	it("explains ✓? in the key help", () => {
+		const view = central(branch, { rows: 60 });
+		view.key("?");
+		expect(view.text(120)).toContainEqual(
+			expect.stringMatching(/^│ {3}✓\? like <ID>: looks answered by that closed ask; it stays open until you answer it or press x\. +│$/),
+		);
 	});
 });
 

@@ -51,3 +51,6 @@
 - The widget's pending count matches the Pending title: a group of repeats counts once.
 - A group row answers only its newest ask (a group is a display fold, never a link); press `l` first
   to close the whole group together, or `→` and answer each. The `?` card and README say so.
+- Looks answered: an open Pending row like an older answered or dismissed ask (a hidden ask of its
+  group too) shows `✓? like <ID>` with the newest such ask, after `↺` and `≈ N similar`. Nothing
+  closes by itself; answer it or press `x`. The `?` card explains it.

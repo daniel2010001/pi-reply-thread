@@ -33,6 +33,8 @@ export interface PendingAsk extends Ask {
 	continues?: string;
 	/** An older open ask that looks like a repeat, for an ask without links. Never linked by itself. */
 	suggestion?: Ask;
+	/** The newest closed ask, chain members too, older than this row and like its text. Never closes it. */
+	looksAnswered?: Ask;
 }
 
 /** How a closed ask closed: a later prompt cited it, with the answer it gave, or the central dismissed it. */
@@ -272,11 +274,19 @@ export function buildAsks(entries: readonly SessionEntry[], threads = buildThrea
 	done.sort((a, b) => a.ask.seq - b.ask.seq);
 
 	const openAsks = rows.flatMap((row) => [...row.chain, row]).sort((a, b) => a.seq - b.seq);
+	const closedAsks = done.flatMap((row) => [...row.chain, row.ask]).sort((a, b) => a.seq - b.seq);
 	for (const row of rows) {
+		row.looksAnswered = closedAsks.findLast((other) => other.seq < row.seq && similarAsks(other.text, row.text));
 		if (row.chain.length) continue;
 		row.suggestion = openAsks.findLast((other) => other.seq < row.seq && similarAsks(other.text, row.text));
 	}
 	return { pending: rows, closed: done };
+}
+
+/** The newest closed ask any row of a repeat group looks like, hidden members too: the group's `✓?` mark. */
+export function looksAnsweredBy(group: readonly PendingAsk[]): Ask | undefined {
+	const found = group.flatMap((row) => row.looksAnswered ?? []);
+	return found.length ? found.reduce((newest, ask) => (ask.seq > newest.seq ? ask : newest)) : undefined;
 }
 
 /**
