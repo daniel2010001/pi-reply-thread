@@ -301,7 +301,7 @@ quote, or has nothing after the quote, answers with its first line.
 ### Widget
 
 A widget above the editor summarizes the latest prompt while it has two or more replies, with `⚠`
-on each reply that still has an open ask, and counts the open asks (a chain counts once) whenever
+on each reply that still has an open ask, and counts the open asks like the Pending title (a chain or a group of repeats counts once) whenever
 there are any:
 
 ```

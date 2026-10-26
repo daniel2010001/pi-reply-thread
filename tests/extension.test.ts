@@ -305,6 +305,21 @@ describe("pending central", () => {
 		expect(again.seen[0][0]).toMatch(/^╭─ Replies /);
 	});
 
+	it("counts a group of similar asks once in the widget, like the Pending title", async () => {
+		const { emit } = load();
+		const repeats = [
+			user("medí el consumo"),
+			assistant("Las mediciones dejaron archivos en /tmp: ¿los borro?", { id: "b1b1b1b1" }),
+			user("seguimos"),
+			assistant("¿Borro los archivos de las mediciones en /tmp?", { id: "b2b2b2b2" }),
+		];
+		const { ctx, widgets } = fakeCtx(repeats, "tui");
+		await emit("session_start", ctx);
+		expect(widgetText(widgets[0][1])).toEqual([
+			"⚠ 1 pending · newest: P2.R1.Q1 ¿Borro los archivos de las mediciones en /tmp? · alt+r",
+		]);
+	});
+
 	it("shows the pending line in the widget, even under a prompt with one reply", async () => {
 		const { emit } = load();
 		const { ctx, widgets } = fakeCtx(branch, "tui");

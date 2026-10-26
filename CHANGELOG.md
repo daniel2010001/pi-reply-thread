@@ -48,3 +48,4 @@
   else the newest), even when its ID now names another ask, as after a decision section renumbered a
   reply; the Answered tab reads the answer from that quote. A quote without text, or with a text no
   ask has, and an ID outside a quote close by ID as before.
+- The widget's pending count matches the Pending title: a group of repeats counts once.

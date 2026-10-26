@@ -3,7 +3,7 @@ import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";
 import type { AskMode } from "../src/asks.ts";
 import { answerFormat, FORMAT_ENTRY, formatIndex, formatPending, formatReplyPlain, widgetLines } from "../src/format.ts";
 import { findReply, noMatchMessage } from "../src/lookup.ts";
-import { ASK_ENTRY, type AskAction, buildAsks, buildPending } from "../src/pending.ts";
+import { ASK_ENTRY, type AskAction, buildAsks, buildPending, similarGroups } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
 import { type Central, OVERLAY_OPTIONS, RepliesView } from "./replies-view.ts";
 
@@ -37,7 +37,8 @@ function refreshWidget(pi: ExtensionAPI, ctx: ExtensionContext): void {
 	if (ctx.mode !== "tui") return;
 	const branch = ctx.sessionManager.getBranch();
 	const threads = buildThreads(branch, askMode(pi));
-	const lines = widgetLines(threads, buildPending(branch, threads));
+	const pending = buildPending(branch, threads);
+	const lines = widgetLines(threads, pending, similarGroups(pending).length);
 	if (!lines) {
 		ctx.ui.setWidget(WIDGET, undefined, { placement: "aboveEditor" });
 		return;
