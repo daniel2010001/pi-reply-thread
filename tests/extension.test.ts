@@ -1,10 +1,16 @@
 process.env.TZ = "UTC";
 
-import type { ExtensionAPI, KeybindingsManager, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, initTheme, type KeybindingsManager, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import replyThread from "../extensions/reply-thread.ts";
+import { buildAsks } from "../src/pending.ts";
+import { buildThreads } from "../src/threads.ts";
+import { triageRequest } from "../src/triage.ts";
 import { askEntry, assistant, customEntry, jobNotice, resetIds, user } from "./helpers.ts";
+
+// The triage loader draws its key hint with Pi's global theme.
+beforeAll(() => initTheme("dark", false));
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
 type WidgetFactory = (tui: unknown, theme: unknown) => { render(width: number): string[] };
@@ -52,21 +58,59 @@ interface Overlay {
 	render(width: number): string[];
 }
 
-/** `keys` are pressed in the overlay once it opens; `seen` keeps its first frame and, after keys, its last. */
-function fakeCtx(branch: SessionEntry[], mode: "tui" | "print" = "print", keys: string[] = []) {
+/** What `/replies triage` meets: the session model, the confirm answer, the model reply and keys for the loader. */
+interface TriageSetup {
+	model?: { provider: string; id: string };
+	confirm?: boolean;
+	/** The message `streamSimple(...).result()` resolves with; it gets the loader's abort signal. */
+	reply?: (signal: AbortSignal) => Promise<unknown>;
+	loaderKeys?: string[];
+}
+
+/**
+ * `keys` are pressed in the overlay once it opens; `seen` keeps its first frame and, after keys, its last.
+ * A custom without options is the triage loader: it gets `loaderKeys` and resolves only through `done`.
+ */
+function fakeCtx(branch: SessionEntry[], mode: "tui" | "print" = "print", keys: string[] = [], triage: TriageSetup = {}) {
 	const pastes: string[] = [];
 	const seen: string[][] = [];
 	const notices: [string, string | undefined][] = [];
 	const widgets: [string, unknown, unknown][] = [];
 	const customs: unknown[] = [];
+	const confirms: [string, string][] = [];
+	const calls: [unknown, unknown, { signal?: AbortSignal }][] = [];
+	const loaders: string[][] = [];
 	const ctx = {
 		mode,
 		hasUI: mode === "tui",
+		model: triage.model,
+		modelRegistry: {
+			streamSimple: (model: unknown, context: unknown, options: { signal: AbortSignal }) => {
+				calls.push([model, context, options]);
+				return { result: () => (triage.reply ?? (async () => ({ stopReason: "stop", content: [] })))(options.signal) };
+			},
+		},
 		ui: {
 			notify: (message: string, type?: string) => notices.push([message, type]),
 			setWidget: (key: string, content: unknown, options?: unknown) => widgets.push([key, content, options]),
+			confirm: async (title: string, message: string) => {
+				confirms.push([title, message]);
+				return triage.confirm ?? true;
+			},
 			custom: (factory: unknown, options: unknown) => {
 				customs.push(options);
+				if (!options) {
+					return new Promise((resolve) => {
+						const tui = { terminal: { rows: 30 }, requestRender: () => {} };
+						const make = factory as (...args: unknown[]) => Overlay & { dispose?(): void };
+						const loader = make(tui, fakeTheme, keybindings, (value: unknown) => {
+							loader.dispose?.();
+							resolve(value);
+						});
+						loaders.push(loader.render(80).map(stripTerminalSequences));
+						for (const key of triage.loaderKeys ?? []) loader.handleInput(KEYS[key] ?? key);
+					});
+				}
 				return new Promise((resolve) => {
 					const tui = { terminal: { rows: 30 }, requestRender: () => {} };
 					const make = factory as (...args: unknown[]) => Overlay;
@@ -81,7 +125,7 @@ function fakeCtx(branch: SessionEntry[], mode: "tui" | "print" = "print", keys: 
 		},
 		sessionManager: { getBranch: () => branch },
 	};
-	return { ctx, notices, widgets, customs, pastes, seen };
+	return { ctx, notices, widgets, customs, pastes, seen, confirms, calls, loaders };
 }
 
 const fakeTheme = {
@@ -110,7 +154,7 @@ describe("reply-thread extension", () => {
 	it("registers /replies with a description", () => {
 		const { commands } = load();
 		expect(commands.get("replies")?.description).toBe(
-			"List the replies of each prompt and the asks waiting on you; /replies <P#.R#[.Q#] | entry ID[.#]> opens one in full, /replies pending lists the open asks",
+			"List the replies of each prompt and the asks waiting on you; /replies <P#.R#[.Q#] | entry ID[.#]> opens one in full, /replies pending lists the open asks, /replies triage asks the session model to propose answered and repeated asks",
 		);
 	});
 
@@ -524,5 +568,208 @@ describe("plain-text index", () => {
 		expect(await index()).toEqual(rows("  ⚠", "  ⚠"));
 		branch.push(user("> P1.R1.Q2: ¿La subo?\nR: Sí.\n> P1.R2.Q1: ¿Mergeo?\nR: No."));
 		expect(await index()).toEqual(rows("  ✓", "  ✓").map(([text, type]) => [`P3 · 12:00 · > P1.R1.Q2: ¿La subo?\n${text}`, type]));
+	});
+});
+
+describe("/replies triage", () => {
+	const MODEL = { provider: "anthropic", id: "claude-test" };
+	const reply = (text: string, extra: Record<string, unknown> = {}) => async () => ({
+		role: "assistant",
+		content: [{ type: "text", text }],
+		stopReason: "stop",
+		...extra,
+	});
+	const ONE = JSON.stringify({ proposals: [{ kind: "answered", ask: "P1.R1.Q1", prompt: "P2", quote: "la primera" }] });
+
+	beforeEach(() => {
+		branch[1] = assistant("Encontré dos opciones. ¿Cuál preferís?", { id: "a1b2c3d4" });
+		branch.push(user("la primera, dale"));
+	});
+
+	const tokens = (entries: SessionEntry[]) => {
+		const threads = buildThreads(entries);
+		const sent = triageRequest(buildAsks(entries, threads), threads);
+		return { sent, about: Math.ceil((sent?.chars ?? 0) / 4) };
+	};
+
+	it("needs the interactive TUI: an error outside it, and nothing else", async () => {
+		const { commands, appended } = load();
+		const { ctx, notices, confirms, calls, customs } = fakeCtx(branch, "print", [], { model: MODEL, reply: reply(ONE) });
+		await commands.get("replies")!.handler("triage", ctx);
+		expect(notices).toEqual([["/replies triage needs the interactive TUI.", "error"]]);
+		expect({ confirms, calls, customs, appended }).toEqual({ confirms: [], calls: [], customs: [], appended: [] });
+	});
+
+	it("says there is nothing to triage without open asks, with no confirm and no model call", async () => {
+		const { commands, appended } = load();
+		branch.push(askEntry({ action: "dismiss", ask: "a1b2c3d4.1" }));
+		const { ctx, notices, confirms, calls } = fakeCtx(branch, "tui", [], { model: MODEL, reply: reply(ONE) });
+		await commands.get("replies")!.handler("triage", ctx);
+		expect(notices).toEqual([["No open asks to triage.", "info"]]);
+		expect({ confirms, calls, appended }).toEqual({ confirms: [], calls: [], appended: [] });
+	});
+
+	it("needs a session model: an error without one, and no confirm", async () => {
+		const { commands, appended } = load();
+		const { ctx, notices, confirms, calls } = fakeCtx(branch, "tui", [], { reply: reply(ONE) });
+		await commands.get("replies")!.handler("triage", ctx);
+		expect(notices).toEqual([["No model selected; choose one with /model.", "error"]]);
+		expect({ confirms, calls, appended }).toEqual({ confirms: [], calls: [], appended: [] });
+	});
+
+	it("asks to confirm with the model, the counts and the size, and sends nothing when declined", async () => {
+		const { commands, appended } = load();
+		const { ctx, notices, confirms, calls, customs } = fakeCtx(branch, "tui", [], { model: MODEL, confirm: false, reply: reply(ONE) });
+		await commands.get("replies")!.handler("triage", ctx);
+		const { about } = tokens(branch);
+		expect(about).toBeGreaterThan(0);
+		expect(confirms).toEqual([
+			[
+				"Triage open asks?",
+				`Send 1 open ask and 1 later prompt (about ${about} tokens) to anthropic/claude-test. The model only proposes; nothing closes until you accept.`,
+			],
+		]);
+		expect({ notices, calls, customs, appended }).toEqual({ notices: [], calls: [], customs: [], appended: [] });
+	});
+
+	it("counts asks and prompts in the plural, and 0 later prompts", async () => {
+		resetIds();
+		const entries = [user("hola"), assistant("¿Arrancamos con T14?\n\n¿Usamos Piper?", { id: "aaaaaaa1" })];
+		const { commands } = load();
+		const { ctx, confirms } = fakeCtx(entries, "tui", [], { model: MODEL, confirm: false });
+		await commands.get("replies")!.handler("triage", ctx);
+		expect(confirms[0][1]).toBe(
+			`Send 2 open asks and 0 later prompts (about ${tokens(entries).about} tokens) to anthropic/claude-test. The model only proposes; nothing closes until you accept.`,
+		);
+	});
+
+	it("sends the request to the session model under a loader, stores the proposals, refreshes the widget and opens Pending", async () => {
+		const { commands, appended } = load();
+		const triage = fakeCtx(branch, "tui", ["tui.select.cancel"], { model: MODEL, reply: reply(ONE) });
+		await commands.get("replies")!.handler("TRIAGE", triage.ctx);
+		const { sent } = tokens(branch);
+		expect(triage.calls).toEqual([
+			[
+				MODEL,
+				{
+					systemPrompt: sent?.systemPrompt,
+					messages: [{ role: "user", content: [{ type: "text", text: sent?.text }], timestamp: expect.any(Number) }],
+				},
+				{ signal: expect.any(AbortSignal) },
+			],
+		]);
+		expect(triage.loaders[0].join("\n")).toContain("Triage with anthropic/claude-test… (esc cancels)");
+		expect(appended).toEqual([
+			[
+				"reply-thread.triage",
+				{
+					model: "anthropic/claude-test",
+					proposals: [{ kind: "answered", ask: "a1b2c3d4.1", prompt: "00000006", quote: "la primera" }],
+				},
+			],
+		]);
+		expect(triage.notices).toEqual([["Triage: 1 proposal; a accepts and n rejects in Pending.", "info"]]);
+		expect(triage.widgets.length).toBeGreaterThan(0);
+		expect(triage.customs).toEqual([undefined, { overlay: true, overlayOptions: { width: "90%", maxHeight: "90%", anchor: "center" } }]);
+		expect(triage.seen[0][0]).toMatch(/^╭─ Pending /);
+		expect(triage.seen[0]).toContainEqual(expect.stringMatching(/^│ +✦ answered in P2: "la primera" +│$/));
+	});
+
+	it("a in the Pending tab it opens writes the answer, and the count is plural for 2 proposals", async () => {
+		resetIds();
+		// load() appends to `branch`, so the central rebuilt after the triage sees its proposals.
+		branch = [
+			user("hola"),
+			assistant("¿Arrancamos con T14?\n\n¿Usamos Piper?", { id: "aaaaaaa1" }),
+			user("vamos con T14, y Piper me parece bien"),
+		];
+		const two = JSON.stringify({
+			proposals: [
+				{ kind: "answered", ask: "P1.R1.Q1", prompt: "P2", quote: "vamos con T14" },
+				{ kind: "answered", ask: "P1.R1.Q2", prompt: "P2", quote: "Piper me parece bien" },
+			],
+		});
+		const { commands, appended } = load();
+		const { ctx, notices } = fakeCtx(branch, "tui", ["a", "tui.select.cancel"], { model: MODEL, reply: reply(two) });
+		await commands.get("replies")!.handler("triage", ctx);
+		expect(notices).toEqual([["Triage: 2 proposals; a accepts and n rejects in Pending.", "info"]]);
+		expect(appended.slice(1)).toEqual([
+			["reply-thread.ask", { action: "answer", ask: "aaaaaaa1.1", prompt: "00000003", text: "vamos con T14" }],
+		]);
+	});
+
+	it("Esc on the loader cancels: aborts the call, says so, and writes nothing", async () => {
+		const { commands, appended } = load();
+		let aborted = false;
+		const waits = (signal: AbortSignal) =>
+			new Promise((resolve) =>
+				signal.addEventListener("abort", () => {
+					aborted = true;
+					resolve({ role: "assistant", content: [], stopReason: "aborted" });
+				}),
+			);
+		const { ctx, notices, customs } = fakeCtx(branch, "tui", [], { model: MODEL, reply: waits, loaderKeys: ["\x1b"] });
+		await commands.get("replies")!.handler("triage", ctx);
+		expect(aborted).toBe(true);
+		expect(notices).toEqual([["Triage cancelled.", "info"]]);
+		expect(customs).toEqual([undefined]);
+		expect(appended).toEqual([]);
+	});
+
+	it("an aborted reply cancels the same way", async () => {
+		const { commands, appended } = load();
+		const { ctx, notices } = fakeCtx(branch, "tui", [], { model: MODEL, reply: reply(ONE, { stopReason: "aborted" }) });
+		await commands.get("replies")!.handler("triage", ctx);
+		expect(notices).toEqual([["Triage cancelled.", "info"]]);
+		expect(appended).toEqual([]);
+	});
+
+	it("reports a failed call, thrown or as an error reply, and writes nothing", async () => {
+		const { commands, appended } = load();
+		const thrown = fakeCtx(branch, "tui", [], {
+			model: MODEL,
+			reply: async () => {
+				throw new Error("network down");
+			},
+		});
+		await commands.get("replies")!.handler("triage", thrown.ctx);
+		expect(thrown.notices).toEqual([["Triage failed: network down", "error"]]);
+		const errored = fakeCtx(branch, "tui", [], {
+			model: MODEL,
+			reply: reply("", { stopReason: "error", errorMessage: "rate limited" }),
+		});
+		await commands.get("replies")!.handler("triage", errored.ctx);
+		expect(errored.notices).toEqual([["Triage failed: rate limited", "error"]]);
+		expect(appended).toEqual([]);
+		expect([...thrown.customs, ...errored.customs]).toEqual([undefined, undefined]);
+	});
+
+	it("says it found nothing when no proposal holds, and writes nothing", async () => {
+		const { commands, appended } = load();
+		for (const text of ['{"proposals":[]}', "Nothing to propose.", JSON.stringify({ proposals: [{ kind: "answered", ask: "P1.R1.Q1", prompt: "P2", quote: "not in the prompt" }] })]) {
+			const { ctx, notices, customs } = fakeCtx(branch, "tui", [], { model: MODEL, reply: reply(text) });
+			await commands.get("replies")!.handler("triage", ctx);
+			expect(notices).toEqual([["Triage found nothing to propose.", "info"]]);
+			expect(customs).toEqual([undefined]);
+		}
+		expect(appended).toEqual([]);
+	});
+
+	it("leaves /replies pending and /replies <id> as they were, with a triage on the branch and no model call", async () => {
+		branch.push(
+			customEntry("reply-thread.triage", {
+				model: "anthropic/claude-test",
+				proposals: [{ kind: "answered", ask: "a1b2c3d4.1", prompt: "00000006", quote: "la primera" }],
+			}),
+		);
+		const { commands, appended } = load();
+		const pending = fakeCtx(branch, "print", [], { model: MODEL });
+		await commands.get("replies")!.handler("pending", pending.ctx);
+		expect(pending.notices).toEqual([["P1.R1.Q1  a1b2c3d4.1  Encontré dos opciones. ¿Cuál preferís?", "info"]]);
+		const one = fakeCtx(branch, "print", [], { model: MODEL });
+		await commands.get("replies")!.handler("P1.R1", one.ctx);
+		expect(one.notices).toEqual([["P1.R1 · a1b2c3d4 · 12:00 · prompt\n\nEncontré dos opciones. ¿Cuál preferís?", "info"]]);
+		expect([...pending.calls, ...one.calls, ...pending.confirms, ...one.confirms]).toEqual([]);
+		expect(appended).toEqual([]);
 	});
 });

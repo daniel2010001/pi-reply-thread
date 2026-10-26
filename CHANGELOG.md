@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- `/replies triage` (optional, TUI only): after a confirm that names the model, the number of open
+  asks and later prompts and their rough size in tokens, the session model proposes which open asks a
+  later prompt already answered and which ones repeat another. `Esc` cancels the call. Only proposals
+  that hold up are kept, in a `reply-thread.triage` entry, and Pending opens with a `✦` line under each
+  row that has one (`✦ answered in P2: "<quote>"` or `✦ same as P1.R1.Q2  <ask>`, `+N more`).
+- Nothing closes or links by itself: `a` accepts the row's first proposal (an answer with the quote, or
+  the link `l` writes), `n` rejects it so it does not come back, and `Backspace` undoes both. The `?`
+  card lists `a` and `n`; the short hints are unchanged.
+
 ## 0.1.0 (2026-10-26)
 
 - Group every final reply of a session branch under the prompt that started it, with an ordered ID

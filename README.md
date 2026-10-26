@@ -20,7 +20,7 @@ place, where you answer them by pasting a quote.
 ╰─ ↑↓ move · enter open · esc close ───────────────────────────────────────╯
 ```
 
-- No extra model call. Everything is computed from the session branch.
+- No extra model call. Everything is computed from the session branch; only the optional `/replies triage` calls your session model, after you confirm it.
 - Nothing enters the model context.
 - Works after `/resume` and on any branch, because the index is rebuilt from the branch every time.
 
@@ -48,6 +48,7 @@ gsh -- -e ./extensions/reply-thread.ts   # Gentle Shell
 |---|---|
 | `/replies` or `Alt+R` | Opens the overlay on **Pending** while any ask is open, else on **Replies** (the index of the current branch, newest prompt first). `Tab` cycles Pending → Replies → Answered. |
 | `/replies pending` | Opens the **Pending** tab, even when nothing waits. |
+| `/replies triage` | Asks your session model which open asks a later prompt already answered or another ask repeats, after a confirm; see [Triage](#triage-optional-uses-your-session-model). |
 | `/replies P12.R1` | Opens one reply in full by its ordered ID (case-insensitive). |
 | `/replies a1b2c3d4` | Opens one reply in full by its entry ID. |
 | `/replies P12.R1.Q2` or `/replies a1b2c3d4.2` | Opens the reply that asks that question. |
@@ -205,7 +206,8 @@ that look alike show as one row, on the newest of them (see [Repeated asks](#rep
 | `o` | Opens the reply that asks it; `Esc` comes back. |
 | `→` / `←` | Expands a row with `≈ N similar` to show its similar asks under it / collapses it again. |
 | `l` / `u` | Links the marked asks (2 or more) as one chain, or the selected row and its similar asks to the oldest of them / unlinks the chain. |
-| `Backspace` (`⌫`) | Undoes the last `x`, `l` or `u` (see [Undo](#undo)). |
+| `a` / `n` | Accepts / rejects the row's `✦` triage proposal (see [Triage](#triage-optional-uses-your-session-model)). |
+| `Backspace` (`⌫`) | Undoes the last `x`, `l`, `u`, `a` or `n` (see [Undo](#undo)). |
 | `Tab` | Goes to the next tab: Pending → Replies → Answered → Pending. |
 | `?` | Shows a card with every key of each tab; `?` or `Esc` hides it. |
 | `Esc` | Closes. |
@@ -317,6 +319,41 @@ expands it.
 Dismiss, reopen and link are stored as `reply-thread.ask` custom entries on the session branch (outside the
 model context), so they follow `/resume` and branches like everything else.
 
+### Triage (optional, uses your session model)
+
+Everything above works without a model. When the open asks pile up, `/replies triage` asks the model
+selected in your session to point out two things: an open ask a later prompt already answered without
+quoting it, and two open asks that ask the same thing in other words.
+
+- **What is sent**: every open ask (ordered ID and text) and every prompt of yours after the oldest
+  open ask (`P#` and text, each cut at 2000 characters). Nothing else from the session.
+- **Cost**: it is one model call on your account. A confirm names the model, how many asks and
+  prompts it sends and their rough size in tokens; declining sends nothing.
+- **Esc** while it waits cancels the call; nothing is written.
+- Only the TUI runs it. Without open asks or without a selected model it says so and calls nothing.
+
+The model only proposes. Each proposal it gives that holds up (known IDs, the quote really in that
+prompt, the prompt after the ask) is stored in a `reply-thread.triage` entry, and Pending opens with a
+`✦` line under the row it is for:
+
+```
+│ ›○ P1.R1.Q1  Should I start with T14?                                                  │
+│              ✦ answered in P2: "let's go with T14"                                     │
+│  ○ P3.R1.Q1  Do we use Piper for the voice?                                            │
+│              ✦ same as P1.R1.Q2  Should the reader use Piper?  +1 more                 │
+```
+
+Nothing closes or links until you press a key on the row:
+
+- `a` accepts the first proposal shown. `answered` closes the ask as answered by that prompt, with the
+  quote as its answer (the Answered tab shows `↳ P2  let's go with T14`); `same` links the two rows,
+  as `l` does.
+- `n` rejects it: it hides, and a new triage does not show it again. The next one, if any, shows.
+- `Backspace` undoes either: an accepted answer is reopened, a link unlinked, a rejection restored.
+
+A new `/replies triage` replaces the proposals of the previous one; a proposal that no longer applies
+(its ask closed, or the other ask closed or linked) does not show.
+
 ### Answered asks
 
 The **Answered** tab lists the closed asks, grouped under the prompt of their reply, newest prompt
@@ -376,12 +413,15 @@ smallest reply and prompt that show it (remove anything private from them first)
   listed, or a line that is not in the reply at all.
 - **A decision-section item is missing or misnumbered.** In the default mode, an item of the
   `## Needs your decision` list is not listed, or its `Q#` differs from its item number.
-- **A key changes the wrong ask.** `x`, `l`, `u`, `r` or `Backspace` changes an ask other than the one
+- **A key changes the wrong ask.** `x`, `l`, `u`, `r`, `a`, `n` or `Backspace` changes an ask other than the one
   you acted on, or Enter/`y` pastes another ask.
 - **The overlay or the widget does not fit.** A line runs past the screen width, the card is taller
   than the screen, or the bottom border with the keys is cut off.
 - **Something reaches the model.** The package never adds messages to the model's context; only the
-  prompt you send (a pasted quote, for example) does.
+  prompt you send (a pasted quote, for example) does. `/replies triage` makes its own call only after
+  you confirm it.
+- **A triage proposal acts by itself.** An ask closes or links after `/replies triage` without you
+  pressing `a`.
 - **The state changes on its own.** After `/resume`, a restart or switching branches, an ask closes or
   reopens without anything new on that branch.
 - **Pi shows an error from the extension or crashes.**

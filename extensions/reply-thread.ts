@@ -1,10 +1,11 @@
-import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { BorderedLoader, type ExtensionAPI, type ExtensionContext, type Theme } from "@earendil-works/pi-coding-agent";
 import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";
 import type { AskMode } from "../src/asks.ts";
 import { answerFormat, FORMAT_ENTRY, formatIndex, formatPending, formatReplyPlain, widgetLines } from "../src/format.ts";
 import { findReply, noMatchMessage } from "../src/lookup.ts";
-import { ASK_ENTRY, type AskAction, buildAsks, buildPending, similarGroups } from "../src/pending.ts";
+import { ASK_ENTRY, type AskAction, buildAsks, buildPending, similarGroups, TRIAGE_ENTRY } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
+import { parseTriage, triageRequest } from "../src/triage.ts";
 import { type Central, OVERLAY_OPTIONS, RepliesView } from "./replies-view.ts";
 
 const WIDGET = "reply-thread";
@@ -13,7 +14,7 @@ const WIDGET = "reply-thread";
 const SHORTCUT = "alt+r";
 
 const DESCRIPTION =
-	"List the replies of each prompt and the asks waiting on you; /replies <P#.R#[.Q#] | entry ID[.#]> opens one in full, /replies pending lists the open asks";
+	"List the replies of each prompt and the asks waiting on you; /replies <P#.R#[.Q#] | entry ID[.#]> opens one in full, /replies pending lists the open asks, /replies triage asks the session model to propose answered and repeated asks";
 
 /** Which lines of a reply are asks; Gentle Shell passes it after `--`. */
 const FLAG = "reply-thread-asks";
@@ -31,6 +32,10 @@ function unknownMode(pi: ExtensionAPI): string | undefined {
 	const value = pi.getFlag(FLAG);
 	if (value === undefined || value === "section" || value === "all") return undefined;
 	return `Unknown --${FLAG} "${value}"; using "section". Use "section" or "all".`;
+}
+
+function plural(count: number, one: string, many: string): string {
+	return `${count} ${count === 1 ? one : many}`;
 }
 
 function refreshWidget(pi: ExtensionAPI, ctx: ExtensionContext): void {
@@ -100,12 +105,95 @@ async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string)
 	if (paste) ctx.ui.pasteToEditor(paste);
 }
 
+/** How the model call ended: its reply text, its error, or undefined when cancelled. */
+type TriageOutcome = { text: string } | { error: string } | undefined;
+
+/**
+ * Asks the session model, after a confirm, which open asks a later prompt answered or another ask
+ * repeats; stores its proposals on the branch and opens Pending. Nothing closes or links here.
+ */
+async function triage(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
+	if (ctx.mode !== "tui") {
+		ctx.ui.notify("/replies triage needs the interactive TUI.", "error");
+		return;
+	}
+	const branch = ctx.sessionManager.getBranch();
+	const threads = buildThreads(branch, askMode(pi));
+	const state = buildAsks(branch, threads);
+	const request = triageRequest(state, threads);
+	if (!request) {
+		ctx.ui.notify("No open asks to triage.", "info");
+		return;
+	}
+	const model = ctx.model;
+	if (!model) {
+		ctx.ui.notify("No model selected; choose one with /model.", "error");
+		return;
+	}
+	const name = `${model.provider}/${model.id}`;
+	const sent = `${plural(request.asks, "open ask", "open asks")} and ${plural(request.prompts, "later prompt", "later prompts")}`;
+	const ok = await ctx.ui.confirm(
+		"Triage open asks?",
+		`Send ${sent} (about ${Math.ceil(request.chars / 4)} tokens) to ${name}. The model only proposes; nothing closes until you accept.`,
+	);
+	if (!ok) return;
+
+	const outcome = await ctx.ui.custom<TriageOutcome>((tui, theme, _keybindings, done) => {
+		const loader = new BorderedLoader(tui, theme, `Triage with ${name}… (esc cancels)`, { cancellable: true });
+		let finished = false;
+		const finish = (result: TriageOutcome) => {
+			if (finished) return;
+			finished = true;
+			done(result);
+		};
+		loader.onAbort = () => finish(undefined);
+		const context = {
+			systemPrompt: request.systemPrompt,
+			messages: [{ role: "user" as const, content: [{ type: "text" as const, text: request.text }], timestamp: Date.now() }],
+		};
+		const call = async (): Promise<TriageOutcome> => {
+			const message = await ctx.modelRegistry.streamSimple(model, context, { signal: loader.signal }).result();
+			if (message.stopReason === "aborted") return undefined;
+			if (message.stopReason === "error") return { error: message.errorMessage ?? "unknown error" };
+			return { text: message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n") };
+		};
+		call()
+			.then(finish)
+			.catch((error: unknown) => {
+				if (loader.signal.aborted) return finish(undefined);
+				finish({ error: error instanceof Error ? error.message : String(error) });
+			});
+		return loader;
+	});
+
+	if (!outcome) {
+		ctx.ui.notify("Triage cancelled.", "info");
+		return;
+	}
+	if ("error" in outcome) {
+		ctx.ui.notify(`Triage failed: ${outcome.error}`, "error");
+		return;
+	}
+	const proposals = parseTriage(outcome.text, state, threads);
+	if (!proposals.length) {
+		ctx.ui.notify("Triage found nothing to propose.", "info");
+		return;
+	}
+	pi.appendEntry(TRIAGE_ENTRY, { model: name, proposals });
+	refreshWidget(pi, ctx);
+	ctx.ui.notify(`Triage: ${plural(proposals.length, "proposal", "proposals")}; a accepts and n rejects in Pending.`, "info");
+	await openReplies(pi, ctx, "pending");
+}
+
 export default function replyThread(pi: ExtensionAPI): void {
 	pi.registerFlag(FLAG, { type: "string", default: "section", description: FLAG_DESCRIPTION });
 
 	pi.registerCommand("replies", {
 		description: DESCRIPTION,
-		handler: (args, ctx) => openReplies(pi, ctx, args.trim()),
+		handler: (args, ctx) => {
+			const arg = args.trim();
+			return arg.toLowerCase() === "triage" ? triage(pi, ctx) : openReplies(pi, ctx, arg);
+		},
 	});
 
 	pi.registerShortcut(SHORTCUT, {
