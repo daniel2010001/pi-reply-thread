@@ -109,7 +109,7 @@ describe("Pending tab", () => {
 		const rows = view.text(120);
 		expect(rows[0]).toMatch(/^╭─ Pending ─+ 3 open · 0 linked ─╮$/);
 		expect(rows.at(-1)).toMatch(
-			/^╰─ enter answer · s sí · f R: lines · space mark · x dismiss · l link · o open · tab replies · esc close ─+╯$/,
+			/^╰─ enter answer · s sí · f format · \? help · esc close ─+╯$/,
 		);
 		view.key("\t");
 		expect(view.text()[0]).toMatch(/^╭─ Replies ─+ 3 prompts · 3 replies ─╮$/);
@@ -189,16 +189,22 @@ describe("answering from the central", () => {
 		});
 	});
 
-	it("f toggles the answer format, saves each choice, and the hint names the current one", () => {
+	it("f toggles the answer format, saves each choice, and the help names the current one", () => {
 		const view = central(branch);
-		expect(view.text(120).at(-1)).toContain(" · f R: lines · ");
+		const format = () => {
+			view.key("?");
+			const line = view.text(120).find((row) => /│ +f /.test(row));
+			view.key("?");
+			return line;
+		};
+		expect(format()).toContain("now R: lines");
 		view.key("f");
 		expect(view.formats).toEqual(["inline"]);
-		expect(view.text(120).at(-1)).toContain(" · f same line · ");
+		expect(format()).toContain("now same line");
 		expect(view.closed()).toBeUndefined();
 		view.key("f");
 		expect(view.formats).toEqual(["inline", "lines"]);
-		expect(view.text(120).at(-1)).toContain(" · f R: lines · ");
+		expect(format()).toContain("now R: lines");
 		view.key("f");
 		view.keys(" ", "tui.select.down", " ", "tui.select.confirm");
 		expect(view.closed()).toEqual({
@@ -208,7 +214,9 @@ describe("answering from the central", () => {
 
 	it("answers in the format it opens with, and s adds → Sí. on the same line", () => {
 		const view = central(branch, { format: "inline" });
-		expect(view.text(120).at(-1)).toContain(" · f same line · ");
+		view.key("?");
+		expect(view.text(120)).toContainEqual(expect.stringContaining("now same line"));
+		view.key("?");
 		view.keys(" ", "tui.select.down", " ", "s");
 		expect(view.closed()).toEqual({
 			paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas? → Sí.\n> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro? → Sí.",
@@ -216,12 +224,13 @@ describe("answering from the central", () => {
 		expect(view.formats).toEqual([]);
 	});
 
-	it("cuts the hint line with … at 80 and 100 columns, keeping the frame width", () => {
+	it("shows the short hints whole from 60 columns, whatever the selected ask allows, and cuts them below", () => {
 		const view = central(branch);
-		expect(view.text(80).at(-1)).toBe("╰─ enter answer · s sí · f R: lines · space mark · x dismiss · l link · o op… ─╯");
-		expect(view.text(100).at(-1)).toBe(
-			"╰─ enter answer · s sí · f R: lines · space mark · x dismiss · l link · o open · tab replies · e… ─╯",
-		);
+		expect(view.text(60).at(-1)).toBe("╰─ enter answer · s sí · f format · ? help · esc close ────╯");
+		expect(view.text(80).at(-1)).toBe(`╰─ enter answer · s sí · f format · ? help · esc close ${"─".repeat(24)}╯`);
+		view.keys(" ", "tui.select.down", " ");
+		expect(view.text(80).at(-1)).toBe(`╰─ enter answer · s sí · f format · ? help · esc close ${"─".repeat(24)}╯`);
+		expect(view.text(40).at(-1)).toBe("╰─ enter answer · s sí · f format · … ─╯");
 	});
 
 	it("o opens the reply of the ask and Esc goes back to Pending", () => {
@@ -263,7 +272,6 @@ describe("dismissing and linking", () => {
 			expect.stringMatching(/^│ ▌P1  limpiá la rama +12:00 │$/),
 			expect.stringMatching(/^│  ○ P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/),
 		]);
-		expect(rows.at(-1)).toContain("u unlink");
 		view.key("u");
 		expect(view.actions.at(-1)).toEqual({ action: "unlink", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" });
 		expect(view.text(100)[0]).toMatch(/ 3 open · 0 linked ─╮$/);
@@ -272,7 +280,6 @@ describe("dismissing and linking", () => {
 	it("l with 3 marked links them as one chain, newest continues the next older, and clears the marks", () => {
 		const view = central(branch);
 		view.keys(" ", "tui.select.down", " ", "tui.select.down", " ");
-		expect(view.text(140).at(-1)).toContain(" · l link · ");
 		view.key("l");
 		expect(view.actions).toEqual([
 			{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.2" },
@@ -286,12 +293,10 @@ describe("dismissing and linking", () => {
 		expect(view.closed()).toEqual({ paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: " });
 	});
 
-	it("l with 2 marked links them even when no ≈ suggestion applies, and the hint offers it", () => {
+	it("l with 2 marked links them even when no ≈ suggestion applies", () => {
 		const view = central(branch);
 		view.keys("tui.select.down", "tui.select.down");
-		expect(view.text(140).at(-1)).not.toContain("l link");
 		view.keys(" ", "tui.select.up", " ");
-		expect(view.text(140).at(-1)).toContain(" · l link · ");
 		view.key("l");
 		expect(view.actions).toEqual([{ action: "link", ask: "a1b2c3d4.2", continues: "a1b2c3d4.1" }]);
 		const rows = view.text(100);
@@ -327,7 +332,6 @@ describe("dismissing and linking", () => {
 		const view = central(branch);
 		view.keys("tui.select.down", "tui.select.down", "l", "u");
 		expect(view.actions).toEqual([]);
-		expect(view.text(100).at(-1)).not.toMatch(/l link|u unlink/);
 	});
 });
 
@@ -596,6 +600,65 @@ describe("Answered tab", () => {
 					expect(lines.at(-1)).toMatch(/^╰─/);
 					expect(lines.slice(1, -1).some((line) => line.includes("›"))).toBe(true);
 				}
+			}
+		}
+	});
+});
+
+describe("key help", () => {
+	const KEYS_LISTED = ["↑↓", "pgup/pgdn", "enter", "s", "f", "space", "x", "l", "u", "o", "tab", "?", "esc", "home/end", "q"];
+
+	it("? opens a card that lists every key, one per line, and ? or Esc closes it", () => {
+		const view = central(branch, { rows: 60 });
+		view.key("?");
+		const rows = view.text(100);
+		expect(rows[0]).toMatch(/^╭─ Keys ─+╮$/);
+		expect(rows.at(-1)).toMatch(/^╰─ ↑↓ scroll · \?\/esc back ─+╯$/);
+		expect(rows.every((line) => visibleWidth(line) === 100)).toBe(true);
+		const keys = rows.slice(1, -1).flatMap((line) => /^│ {3}(\S+(?:, \S+)?) {2,}\S/.exec(line)?.[1].split(", ") ?? []);
+		for (const key of KEYS_LISTED) expect(keys).toContain(key);
+		for (const section of ["Pending", "Replies", "Answered", "Every tab", "Reply viewer"]) {
+			expect(rows).toContainEqual(expect.stringMatching(new RegExp(`^│ ${section} +│$`)));
+		}
+		expect(view.lines(100).find((line) => line.includes("Pending"))).toContain(fg("accent"));
+		view.key("?");
+		expect(view.text(100)[0]).toMatch(/^╭─ Pending /);
+		view.keys("?", "tui.select.cancel");
+		expect(view.text(100)[0]).toMatch(/^╭─ Pending /);
+		expect(view.closed()).toBeUndefined();
+	});
+
+	it("does nothing else while open, and returns to the tab it opened from", () => {
+		const view = central(branch);
+		view.keys("?", "x", "f", "tui.select.confirm", "\t", "?");
+		expect(view.actions).toEqual([]);
+		expect(view.formats).toEqual([]);
+		expect(view.closed()).toBeUndefined();
+		expect(view.text()[0]).toMatch(/^╭─ Pending /);
+		for (const tab of ["Replies", "Answered"]) {
+			view.key("\t");
+			view.key("?");
+			expect(view.text()[0]).toMatch(/^╭─ Keys /);
+			view.key("?");
+			expect(view.text()[0]).toMatch(new RegExp(`^╭─ ${tab} `));
+		}
+	});
+
+	it("fits the overlay cap on 8, 24 and 50 rows at exact widths and scrolls to its last line", () => {
+		for (const rows of [8, 24, 50]) {
+			const cap = Math.min(rows - 4, Math.floor(rows * 0.9));
+			for (const width of [24, 80, 140]) {
+				const view = central(branch, { rows });
+				view.key("?");
+				const first = view.text(width);
+				expect(first.length).toBeLessThanOrEqual(cap);
+				expect(first.every((line) => visibleWidth(line) === width)).toBe(true);
+				expect(first.at(-1)).toMatch(/^╰─/);
+				for (let press = 0; press < 40; press += 1) view.key("tui.select.down");
+				const last = view.text(width);
+				expect(last.length).toBeLessThanOrEqual(cap);
+				expect(last.every((line) => visibleWidth(line) === width)).toBe(true);
+				expect(last.at(-2)).toMatch(/^│ {3}esc, q /);
 			}
 		}
 	});

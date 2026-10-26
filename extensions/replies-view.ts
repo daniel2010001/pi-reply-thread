@@ -169,6 +169,9 @@ export class RepliesView implements Component {
 	private readonly marked = new Set<string>();
 	private expanded = false;
 	private format: AnswerFormat = "lines";
+	/** The key help card, shown over the tab `?` opened it from. */
+	private help = false;
+	private helpTop = 0;
 
 	constructor(
 		tui: TUI,
@@ -259,6 +262,11 @@ export class RepliesView implements Component {
 			else if (matchesKey(data, "home")) this.scroll = 0;
 			else if (matchesKey(data, "end")) this.scroll = Number.MAX_SAFE_INTEGER;
 			else return;
+		} else if (this.help) {
+			if (!this.helpInput(data)) return;
+		} else if (this.central && matchesKey(data, "?")) {
+			this.help = true;
+			this.helpTop = 0;
 		} else if (this.tab === "pending") {
 			if (!this.pendingInput(data)) return;
 		} else if (this.tab === "answered") {
@@ -637,18 +645,13 @@ export class RepliesView implements Component {
 		return selected ? theme.bg("selectedBg", line) : line;
 	}
 
+	/** The short hints; `?` lists the rest. */
 	private pendingHints(): Hint[] {
-		const ask = this.selectedAsk();
 		return [
 			["enter", "answer"],
 			["s", "sí"],
-			["f", FORMAT_NAMES[this.format]],
-			["space", "mark"],
-			["x", "dismiss"],
-			...(this.marked.size >= 2 || ask?.suggestion ? ([["l", "link"]] as Hint[]) : []),
-			...(ask?.continues ? ([["u", "unlink"]] as Hint[]) : []),
-			["o", "open"],
-			["tab", "replies"],
+			["f", "format"],
+			["?", "help"],
 			["esc", "close"],
 		];
 	}
@@ -772,6 +775,72 @@ export class RepliesView implements Component {
 		return [top, ...visible, this.bottom(hints, "", width)];
 	}
 
+	// ── Key help ─────────────────────────────────────────────────────────────
+
+	/** Every key of the central, under the place it works in; a string is a section title. */
+	private helpEntries(): (string | [key: string, action: string])[] {
+		return [
+			"Pending",
+			["enter", "answer the marked or selected asks; expand Older (N)"],
+			["s", "answer Sí."],
+			["f", `switch the answer format; now ${FORMAT_NAMES[this.format]}`],
+			["space", "mark or unmark an ask"],
+			["x", "dismiss the marked or selected asks"],
+			["l", "link the marked asks, or the ask to its ≈ repeat"],
+			["u", "unlink the ask from its chain"],
+			["o", "open the reply that asks it"],
+			"Replies",
+			["enter", "open the reply"],
+			"Answered",
+			["enter, o", "open the reply"],
+			"Every tab",
+			["↑↓, pgup/pgdn", "move"],
+			["tab", "next tab: Pending → Replies → Answered"],
+			["?", "show or hide this help"],
+			["esc", "close"],
+			"Reply viewer",
+			["↑↓", "scroll"],
+			["pgup/pgdn, space", "page"],
+			["home/end", "jump to the top or the end"],
+			["esc, q", "back"],
+		];
+	}
+
+	/** Keys of the help card; false when the key means nothing there. */
+	private helpInput(data: string): boolean {
+		const kb = this.keybindings;
+		const page = Math.max(1, this.listHeight() - 1);
+		if (kb.matches(data, "tui.select.cancel") || matchesKey(data, "?")) this.help = false;
+		else if (kb.matches(data, "tui.select.up")) this.helpTop = Math.max(0, this.helpTop - 1);
+		else if (kb.matches(data, "tui.select.down")) this.helpTop += 1;
+		else if (kb.matches(data, "tui.select.pageUp")) this.helpTop = Math.max(0, this.helpTop - page);
+		else if (kb.matches(data, "tui.select.pageDown")) this.helpTop += page;
+		else return false;
+		return true;
+	}
+
+	private renderHelp(width: number): string[] {
+		const theme = this.theme;
+		const entries = this.helpEntries();
+		const keyWidth = Math.max(...entries.map((entry) => (typeof entry === "string" ? 0 : visibleWidth(entry[0]))));
+		const rows = entries.map((entry) =>
+			typeof entry === "string"
+				? theme.fg("accent", theme.bold(entry))
+				: `  ${theme.fg("accent", entry[0])}${" ".repeat(keyWidth - visibleWidth(entry[0]))}  ${theme.fg("text", entry[1])}`,
+		);
+		const height = Math.min(this.listHeight(), rows.length);
+		this.helpTop = Math.min(this.helpTop, rows.length - height);
+		const cells = scrollCells(theme, rows.length, height, this.helpTop);
+		const visible = rows
+			.slice(this.helpTop, this.helpTop + height)
+			.map((row, offset) => this.line(row, width, cells[offset]));
+		const hints: Hint[] = [
+			["↑↓", "scroll"],
+			["?/esc", "back"],
+		];
+		return [this.top("Keys", "", width), ...visible, this.bottom(hints, "", width)];
+	}
+
 	// ── Viewer ───────────────────────────────────────────────────────────────
 
 	/**
@@ -860,6 +929,7 @@ export class RepliesView implements Component {
 
 	render(width: number): string[] {
 		if (this.reply && this.body) return this.renderViewer(width);
+		if (this.help) return this.renderHelp(width);
 		if (this.tab === "pending") return this.renderPending(width);
 		return this.tab === "answered" ? this.renderAnswered(width) : this.renderList(width);
 	}

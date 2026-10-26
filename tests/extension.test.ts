@@ -270,13 +270,13 @@ describe("pending central", () => {
 	it("answers in the latest format on the branch, lines by default", async () => {
 		const { commands } = load();
 		const answer = async () => {
-			const { ctx, pastes, seen } = fakeCtx(branch, "tui", ["tui.select.confirm"]);
+			const { ctx, pastes } = fakeCtx(branch, "tui", ["tui.select.confirm"]);
 			await commands.get("replies")!.handler("", ctx);
-			return { paste: pastes[0], hints: seen[0].at(-1) };
+			return { paste: pastes[0] };
 		};
-		expect(await answer()).toEqual({ paste: expect.stringMatching(/\nR: $/), hints: expect.stringContaining("f R: lines") });
+		expect(await answer()).toEqual({ paste: expect.stringMatching(/\nR: $/) });
 		branch.push(customEntry("reply-thread.format", { format: "inline" }));
-		expect(await answer()).toEqual({ paste: expect.stringMatching(/ → $/), hints: expect.stringContaining("f same line") });
+		expect(await answer()).toEqual({ paste: expect.stringMatching(/ → $/) });
 		branch.push(customEntry("reply-thread.format", { format: "lines" }));
 		expect((await answer()).paste).toMatch(/\nR: $/);
 	});
