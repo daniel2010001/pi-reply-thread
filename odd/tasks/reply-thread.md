@@ -45,7 +45,7 @@ reply an ordered and a unique ID, and keeps the open asks of earlier replies vis
 | T18 | S8 | [x] Answer format menu: `R:` lines (default) or same line, `f` toggles in Pending | gentle-ai-worker, test-first | `105d430` (mislabelled, see L32) |
 | T19 | S8 | [x] Manual link: `l` with 2+ marked asks links them as one chain | gentle-ai-worker, test-first | `9c4b552` |
 | T20 | S3 | [x] A marker heading with asks under it is a section title, not an ask | gentle-ai-worker, test-first | `d097cb0` |
-| T21 | S3 | [x] `## Needs your decision` convention: README snippet + owner's AGENTS.md | inline | `T21` |
+| T21 | S3 | [x] `## Needs your decision` convention: README snippet + owner's AGENTS.md | inline | `a9cd675` |
 | T14 | S8 | [ ] v0.2, not started: optional on-demand `/replies triage` (L21) | — | — |
 | T7 | S1-S6 | [x] README (English), command help, CHANGELOG | inline | `e9d0b1f` |
 
