@@ -45,7 +45,7 @@ reply an ordered and a unique ID, and keeps the open asks of earlier replies vis
 | T18 | S8 | [ ] Answer format menu: `R:` lines (default) or same line, `f` toggles in Pending | gentle-ai-worker, test-first | — |
 | T19 | S8 | [ ] Manual link: `l` with 2+ marked asks links them as one chain | gentle-ai-worker, test-first | — |
 | T20 | S3 | [ ] A marker heading with asks under it is a section title, not an ask | gentle-ai-worker, test-first | — |
-| T21 | S3 | [ ] `## Needs your decision` convention: README snippet + owner's AGENTS.md | inline | — |
+| T21 | S3 | [ ] `## Needs your decision` convention: README snippet (after the worker) + owner's AGENTS.md (done) | inline | — |
 | T14 | S8 | [ ] v0.2, not started: optional on-demand `/replies triage` (L21) | — | — |
 | T7 | S1-S6 | [x] README (English), command help, CHANGELOG | inline | `e9d0b1f` |
 
@@ -97,3 +97,4 @@ Acabo de probar lo del tab y pasar del pendding a las replies, me encanta. algo 
   - T18 answer formats replace today's paste (quote lines + `\n\n`). `lines` (default): per ask `> <ordinal>: <ask>` + `\n` + `R: ` (with `s`: `R: Sí.`), asks joined by `\n\n`, no trailing newline, so the cursor ends after the last `R: `. `inline`: per ask `> <ordinal>: <ask> → ` (with `s`: `→ Sí.`), asks joined by `\n`, no trailing newline. In the Pending tab, `f` toggles the format; the bottom hints show `f <name>` with the current name (`R: lines` / `same line`). The choice is saved with `pi.appendEntry("reply-thread.format", { format: "lines" | "inline" })`; the latest one on the branch wins, default `lines`. Citing still closes the ask (IDs unchanged).
   - T19 manual link: with 2 or more asks marked, `l` links them as one chain, newest continues the next older, and so on (`link` entries in L19 shape), then clears the marks; with fewer than 2 marked, `l` keeps linking the selected ask to its `≈` suggestion. The `l link` hint shows when either applies.
   - T20: a heading that contains a decision marker (e.g. `## Needs your decision`) is not an ask when its section (until the next heading of any level) has at least one ask; with no ask under it, it still counts (keeps the L23 pinned case `## Needs your decision\n\n- A or B`).
+- L31 (2026-10-25, T21): gsh sets `PI_CODING_AGENT_DIR` to `~/.gentle-shell/agent`, so it reads `~/.gentle-shell/agent/AGENTS.md` (did not exist); `~/.pi/agent/AGENTS.md` is plain Pi only. Owner chose "Crear ~/.gentle-shell/agent/AGENTS.md": created with the 6-line `## Questions for the user` instruction (end with `## Needs your decision`, numbered asks ending in `?`, `ask_user_question` still for fixed choices). README snippet pending until worker mvojbe7g-1-b788 finishes (README is in its surfaces).
