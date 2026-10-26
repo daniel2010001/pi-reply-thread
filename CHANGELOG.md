@@ -56,3 +56,4 @@
   closes by itself; answer it or press `x`. The `?` card explains it.
 - The demo session (`pnpm demo`) is in English, with the same two repeat groups, job notice and
   `## …?` section title.
+- `✓?` uses a looser similarity (40% shared words) than repeat groups (60%).

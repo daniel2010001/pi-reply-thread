@@ -279,14 +279,17 @@ any of them closes the whole chain. `u` unlinks the newest ask from the chain.
 
 #### Looks answered: `✓?`
 
-An open ask that looks like an older ask you already answered or dismissed (the same test as for
-repeats) shows `✓? like <ID>`, dimmed, naming the newest such closed ask. A group row shows it when
+An open ask that looks like an older ask you already answered or dismissed shows `✓? like <ID>`, dimmed, naming the newest such closed ask. A group row shows it when
 any of its asks, hidden ones too, looks answered; an expanded ask shows its own. It comes after `↺`
 and `≈ N similar`, joined by ` · `, and stays whole while the ask text is cut:
 
 ```
 │ ›○ P4.R1.Q1  Should I delete the old branches?  ≈ 1 similar · ✓? like P2.R1.Q1             │
 ```
+
+It uses a looser test than repeats: the asks share at least 40% of their words (longer than 3
+letters), where a group needs 60%. An agent that asks again after you answered usually rewords more,
+and a wrong hint costs little because it never folds or closes anything.
 
 It is only a hint: nothing closes by itself. Answer the ask again, or press `x` to dismiss it.
 

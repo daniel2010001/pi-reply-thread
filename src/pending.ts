@@ -81,17 +81,35 @@ function words(text: string): Set<string> {
 	return new Set(text.split(" ").filter((word) => [...word].length > 3));
 }
 
-/** Same normalized text, or word sets (words longer than 3 letters) with a Jaccard index of 0.6 or more. */
-export function similarAsks(a: string, b: string): boolean {
+/** Two asks this alike are one repeat group. */
+const GROUP_SIMILARITY = 0.6;
+/**
+ * An open ask this alike to a closed one is marked `✓?`. Looser than a group: the mark only hints and
+ * never closes or folds anything, and a re-ask after an answer is usually reworded more.
+ */
+const LOOKS_ANSWERED_SIMILARITY = 0.4;
+
+/** 1 for the same normalized text, else the Jaccard index of the word sets (words longer than 3 letters). */
+function similarity(a: string, b: string): number {
 	const left = normalizeAsk(a);
 	const right = normalizeAsk(b);
-	if (!left || !right) return false;
-	if (left === right) return true;
+	if (!left || !right) return 0;
+	if (left === right) return 1;
 	const one = words(left);
 	const two = words(right);
 	const shared = [...one].filter((word) => two.has(word)).length;
 	const union = one.size + two.size - shared;
-	return union > 0 && shared / union >= 0.6;
+	return union > 0 ? shared / union : 0;
+}
+
+/** Same normalized text, or word sets (words longer than 3 letters) with a Jaccard index of 0.6 or more. */
+export function similarAsks(a: string, b: string): boolean {
+	return similarity(a, b) >= GROUP_SIMILARITY;
+}
+
+/** Whether an open ask is alike enough to a closed one for the `✓?` mark: a Jaccard index of 0.4 or more. */
+export function looksLikeAsk(a: string, b: string): boolean {
+	return similarity(a, b) >= LOOKS_ANSWERED_SIMILARITY;
 }
 
 function escape(text: string): string {
@@ -276,7 +294,7 @@ export function buildAsks(entries: readonly SessionEntry[], threads = buildThrea
 	const openAsks = rows.flatMap((row) => [...row.chain, row]).sort((a, b) => a.seq - b.seq);
 	const closedAsks = done.flatMap((row) => [...row.chain, row.ask]).sort((a, b) => a.seq - b.seq);
 	for (const row of rows) {
-		row.looksAnswered = closedAsks.findLast((other) => other.seq < row.seq && similarAsks(other.text, row.text));
+		row.looksAnswered = closedAsks.findLast((other) => other.seq < row.seq && looksLikeAsk(other.text, row.text));
 		if (row.chain.length) continue;
 		row.suggestion = openAsks.findLast((other) => other.seq < row.seq && similarAsks(other.text, row.text));
 	}

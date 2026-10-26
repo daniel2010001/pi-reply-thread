@@ -5,6 +5,7 @@ import {
 	buildPending,
 	groupLinks,
 	looksAnsweredBy,
+	looksLikeAsk,
 	normalizeAsk,
 	questionIds,
 	similarAsks,
@@ -537,6 +538,31 @@ describe("buildAsks: looks answered", () => {
 		expect(buildAsks(entries).closed.map((row) => row.ask.ordinal)).toEqual(["P1.R1.Q1"]);
 	});
 
+	it("names a closed ask at a looser similarity than a group needs, from 0.4", () => {
+		const CLOSED = "Should I delete the branches?";
+		const AT = "Should I delete the folders tomorrow?";
+		const BELOW = "Should I delete the folders tomorrow morning?";
+		expect(similarAsks(CLOSED, AT)).toBe(false);
+		const entries = (open: string) => [
+			user("clean up"),
+			assistant(CLOSED, { id: "a1a1a1a1" }),
+			user(`> P1.R1.Q1: ${CLOSED}\nR: yes`),
+			assistant(open, { id: "b2b2b2b2" }),
+		];
+		expect(marks(entries(AT))).toEqual([["P2.R1.Q1", "P1.R1.Q1"]]);
+		expect(marks(entries(BELOW))).toEqual([["P2.R1.Q1", undefined]]);
+	});
+
+	it("still groups open asks only from 0.6", () => {
+		const entries = [
+			user("clean up"),
+			assistant("Should I delete the branches?", { id: "a1a1a1a1" }),
+			user("go on"),
+			assistant("Should I delete the folders tomorrow?", { id: "b2b2b2b2" }),
+		];
+		expect(similarGroups(buildAsks(entries).pending).map((group) => group.length)).toEqual([1, 1]);
+	});
+
 	it("names an older dismissed ask too", () => {
 		const entries = [
 			user("clean up"),
@@ -599,9 +625,10 @@ describe("buildAsks: looks answered", () => {
 	});
 
 	it("gives a group the newest mark of any member, a hidden one too", () => {
-		const RELEASE = "Should I merge the release branch?";
+		// TODAY and TONIGHT group (0.67); only TODAY looks like the closed RELEASE (0.4, TONIGHT 0.17).
+		const RELEASE = "Branch for today?";
 		const TODAY = "Should I merge the release branch today?";
-		const NOTES = "Today, should I merge the release notes?";
+		const NOTES = "Should I merge the release branch tonight?";
 		const entries = [
 			user("release"),
 			assistant(RELEASE, { id: "a1a1a1a1" }),
@@ -611,7 +638,8 @@ describe("buildAsks: looks answered", () => {
 			user("and"),
 			assistant(NOTES, { id: "c3c3c3c3" }),
 		];
-		expect(similarAsks(NOTES, RELEASE)).toBe(false);
+		expect(looksLikeAsk(NOTES, RELEASE)).toBe(false);
+		expect(looksLikeAsk(TODAY, RELEASE)).toBe(true);
 		expect(marks(entries)).toEqual([
 			["P2.R1.Q1", "P1.R1.Q1"],
 			["P3.R1.Q1", undefined],
