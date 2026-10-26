@@ -123,7 +123,7 @@ The **Pending** tab lists the asks still open, grouped under their prompt, newes
 | `f` | Switches the answer format between `R: lines` and `same line`; the hint shows the current one. |
 | `x` | Dismisses the marked asks, or the selected one. |
 | `o` | Opens the reply that asks it; `Esc` comes back. |
-| `l` / `u` | Links the suggested repeat / unlinks the chain. |
+| `l` / `u` | Links the marked asks (2 or more) as one chain, or the selected ask to its suggested repeat / unlinks the chain. |
 | `Tab` | Switches to **Replies**. |
 | `Esc` | Closes. |
 
@@ -156,6 +156,8 @@ An ask closes only explicitly:
 Asks often come back in a later reply. When an open ask looks like an older open one (the same text
 after lowercasing and dropping inline code and punctuation, or 60% of their words longer than 3
 letters in common), the row suggests it with `≈ <ordered ID>`. Nothing is linked until you press `l`.
+To link asks the suggestion missed, mark 2 or more with `Space` and press `l`: each one continues the
+next older one, and the marks clear.
 Linked asks form a chain, shown once on its newest ask with `↺ <older IDs>`; answering or dismissing
 any of them closes the whole chain. `u` unlinks the newest ask from the chain.
 

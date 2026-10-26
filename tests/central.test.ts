@@ -267,6 +267,60 @@ describe("dismissing and linking", () => {
 		expect(view.text(100)[0]).toMatch(/ 3 open · 0 linked ─╮$/);
 	});
 
+	it("l with 3 marked links them as one chain, newest continues the next older, and clears the marks", () => {
+		const view = central(branch);
+		view.keys(" ", "tui.select.down", " ", "tui.select.down", " ");
+		expect(view.text(140).at(-1)).toContain(" · l link · ");
+		view.key("l");
+		expect(view.actions).toEqual([
+			{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.2" },
+			{ action: "link", ask: "a1b2c3d4.2", continues: "a1b2c3d4.1" },
+		]);
+		const rows = view.text(100);
+		expect(rows[0]).toMatch(/ 1 open · 1 linked ─╮$/);
+		expect(rows[2]).toMatch(/^│ ›○ P3\.R1\.Q1  ¿Borro las tres ramas viejas\?  ↺ P1\.R1\.Q1, P1\.R1\.Q2 +│$/);
+		expect(rows.some((line) => line.includes("●"))).toBe(false);
+		view.key("tui.select.confirm");
+		expect(view.closed()).toEqual({ paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: " });
+	});
+
+	it("l with 2 marked links them even when no ≈ suggestion applies, and the hint offers it", () => {
+		const view = central(branch);
+		view.keys("tui.select.down", "tui.select.down");
+		expect(view.text(140).at(-1)).not.toContain("l link");
+		view.keys(" ", "tui.select.up", " ");
+		expect(view.text(140).at(-1)).toContain(" · l link · ");
+		view.key("l");
+		expect(view.actions).toEqual([{ action: "link", ask: "a1b2c3d4.2", continues: "a1b2c3d4.1" }]);
+		const rows = view.text(100);
+		expect(rows[0]).toMatch(/ 2 open · 1 linked ─╮$/);
+		expect(rows.slice(1, 5)).toEqual([
+			expect.stringMatching(/^│ ▌P3  revisá los tests +12:00 │$/),
+			expect.stringMatching(/^│  ○ P3\.R1\.Q1  ¿Borro las tres ramas viejas\?  ≈ P1\.R1\.Q1 +│$/),
+			expect.stringMatching(/^│ ▌P1  limpiá la rama +12:00 │$/),
+			expect.stringMatching(/^│ ›○ P1\.R1\.Q2  Necesito tu OK para pushear\.  ↺ P1\.R1\.Q1 +│$/),
+		]);
+		expect(rows.some((line) => line.includes("●"))).toBe(false);
+	});
+
+	it("l with 1 marked still links the selected ask to its ≈ suggestion and keeps the mark", () => {
+		const view = central(branch);
+		view.keys("tui.select.down", "tui.select.down", " ", "tui.select.up", "tui.select.up", "l");
+		expect(view.actions).toEqual([{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" }]);
+		expect(view.text(100)[4]).toMatch(/^│  ● P1\.R1\.Q2/);
+	});
+
+	it("l with a marked chain joins all its asks into the new chain, oldest last", () => {
+		branch.push(askEntry({ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.1" }));
+		const view = central(branch);
+		view.keys(" ", "tui.select.down", " ", "l");
+		expect(view.actions).toEqual([
+			{ action: "link", ask: "c9d0e1f2.1", continues: "a1b2c3d4.2" },
+			{ action: "link", ask: "a1b2c3d4.2", continues: "a1b2c3d4.1" },
+		]);
+		expect(view.text(100)[2]).toMatch(/  ↺ P1\.R1\.Q1, P1\.R1\.Q2 +│$/);
+	});
+
 	it("l and u do nothing on an ask without a suggestion or a chain", () => {
 		const view = central(branch);
 		view.keys("tui.select.down", "tui.select.down", "l", "u");

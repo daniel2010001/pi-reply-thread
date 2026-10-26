@@ -16,7 +16,8 @@
   `/replies` and `Alt+R` open on a **Pending** tab while any ask is open (`Tab` switches to the
   index). `Enter` pastes `> <ID>: <ask>` quotes to answer the marked or selected asks, with an
   `R: ` line under each (`R: lines`, the default) or `→ ` on the quote line (`same line`); `f`
-  switches the format and the latest choice on the branch wins. `s` answers `Sí.`, `x` dismisses, `o` opens the reply, `l`/`u` link and unlink a suggested repeat. An ask
+  switches the format and the latest choice on the branch wins. `s` answers `Sí.`, `x` dismisses, `o` opens the reply, `l`/`u` link and unlink a suggested repeat; `l` with 2 or more
+  marked asks links them as one chain. An ask
   closes only when a later prompt cites its ID or it is dismissed; linked asks close together.
   Prompts beyond the 10 newest fold into `Older (N)`. `/replies pending` lists the open asks as
   plain text, and `/replies <question ID>` opens the reply that asks it.

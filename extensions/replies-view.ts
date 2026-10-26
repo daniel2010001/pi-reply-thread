@@ -11,7 +11,7 @@ import {
 	promptLine,
 	triggerText,
 } from "../src/format.ts";
-import type { AskAction, PendingAsk } from "../src/pending.ts";
+import type { Ask, AskAction, PendingAsk } from "../src/pending.ts";
 import type { Reply, Thread, Trigger, TriggerKind } from "../src/threads.ts";
 
 /** Pi cuts an overlay taller than its `maxHeight`, so the view sizes itself to the same cap. */
@@ -285,6 +285,12 @@ export class RepliesView implements Component {
 		return ask ? [ask] : [];
 	}
 
+	/** The marked asks and the older members of their chains, newest first. */
+	private markedChain(): Ask[] {
+		const rows = this.pending.filter((ask) => this.marked.has(ask.id));
+		return rows.flatMap((row) => [...row.chain, row]).sort((a, b) => b.seq - a.seq);
+	}
+
 	private act(actions: AskAction[]): void {
 		const central = this.central as Central;
 		let pending = this.pending;
@@ -324,6 +330,11 @@ export class RepliesView implements Component {
 			const targets = this.targets();
 			if (!targets.length) return false;
 			this.act(targets.map((target) => ({ action: "dismiss", ask: target.id })));
+		} else if (matchesKey(data, "l") && this.marked.size >= 2) {
+			// Each ask continues the next older one, so the marked asks and their chains become one chain.
+			const members = this.markedChain();
+			this.act(members.slice(1).map((older, index) => ({ action: "link", ask: members[index].id, continues: older.id })));
+			this.marked.clear();
 		} else if (matchesKey(data, "l") && ask?.suggestion) {
 			this.act([{ action: "link", ask: ask.id, continues: ask.suggestion.id }]);
 		} else if (matchesKey(data, "u") && ask?.continues) {
@@ -506,7 +517,7 @@ export class RepliesView implements Component {
 			["f", FORMAT_NAMES[this.format]],
 			["space", "mark"],
 			["x", "dismiss"],
-			...(ask?.suggestion ? ([["l", "link"]] as Hint[]) : []),
+			...(this.marked.size >= 2 || ask?.suggestion ? ([["l", "link"]] as Hint[]) : []),
 			...(ask?.continues ? ([["u", "unlink"]] as Hint[]) : []),
 			["o", "open"],
 			["tab", "replies"],
