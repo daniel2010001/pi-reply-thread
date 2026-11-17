@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- With pi-reply-reader loaded, `s` reads aloud from the overlay: the whole reply in Replies and the
+  reply viewer, only the selected ask in Pending and Answered. The overlay stays open; the `s read`
+  hint and the `?` lines show only while the reader answers the `reply-reader:ping` on Pi's event bus.
+
 ## 0.2.0 (2026-10-26)
 
 - `/replies triage` (optional, TUI only): after a confirm that names the model, the number of open

@@ -6,12 +6,15 @@ import { findReply, noMatchMessage } from "../src/lookup.ts";
 import { ASK_ENTRY, type AskAction, buildAsks, buildPending, similarGroups, TRIAGE_ENTRY } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
 import { parseTriage, triageRequest } from "../src/triage.ts";
-import { type Central, OVERLAY_OPTIONS, RepliesView, type ViewResult } from "./replies-view.ts";
+import { type Central, OVERLAY_OPTIONS, RepliesView, type Speak, type ViewResult } from "./replies-view.ts";
 
 const WIDGET = "reply-thread";
 
 /** Opens the index without typing the command; the widget names it. */
 const SHORTCUT = "alt+r";
+const READER_PING = "reply-reader:ping";
+const READER_READY = "reply-reader:ready";
+const READER_READ = "reply-reader:read";
 
 const DESCRIPTION =
 	"List the replies of each prompt and the asks waiting on you; /replies <P#.R#[.Q#] | entry ID[.#]> opens one in full, /replies pending lists the open asks, /replies triage asks the session model to propose answered and repeated asks";
@@ -83,6 +86,29 @@ function act(pi: ExtensionAPI, ctx: ExtensionContext, action: AskAction) {
 }
 
 /**
+ * Asks pi-reply-reader whether it is loaded: the bus is synchronous, so its `ready` answer to the ping
+ * arrives before `emit` returns. Asked on each open, so a reader unloaded since then hides `s` again.
+ * Contract v1 (reply-reader:ping/ready/read); the packages do not depend on each other.
+ */
+function readerSpeak(pi: ExtensionAPI): Speak | undefined {
+	let ready = false;
+	const stop = pi.events.on(READER_READY, (data) => {
+		if (isVersion1(data)) ready = true;
+	});
+	try {
+		pi.events.emit(READER_PING, { v: 1 });
+	} finally {
+		stop();
+	}
+	if (!ready) return undefined;
+	return (id, text) => pi.events.emit(READER_READ, { v: 1, id, text });
+}
+
+function isVersion1(data: unknown): boolean {
+	return typeof data === "object" && data !== null && (data as { v?: unknown }).v === 1;
+}
+
+/**
  * Opens the central, or the reply `arg` names, or the Pending tab for `pending`; plain text outside
  * the TUI. Answering in the central pastes the quotes into the editor; `t` in Pending runs the triage.
  */
@@ -112,7 +138,8 @@ async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string)
 		mode,
 	};
 	const result = await ctx.ui.custom<ViewResult | undefined>(
-		(tui, theme, keybindings, done) => new RepliesView(tui, theme, keybindings, threads, done, reply, central),
+		(tui, theme, keybindings, done) =>
+			new RepliesView(tui, theme, keybindings, threads, done, reply, central, readerSpeak(pi)),
 		{ overlay: true, overlayOptions: OVERLAY_OPTIONS },
 	);
 	if (typeof result === "string" && result) ctx.ui.pasteToEditor(result);

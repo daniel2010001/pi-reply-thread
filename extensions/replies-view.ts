@@ -181,6 +181,9 @@ function scrollCells(theme: Theme, total: number, height: number, top: number): 
  * in the format `f` toggles, and `t` closes it asking for a triage. An Answered tab lists the closed asks and how they closed; `r` reopens one.
  * Backspace in either tab undoes the newest action this overlay wrote.
  */
+/** Hands a text and the ordinal it shows to pi-reply-reader. */
+export type Speak = (id: string, text: string) => void;
+
 export class RepliesView implements Component {
 	private readonly tui: TUI;
 	private readonly theme: Theme;
@@ -231,6 +234,8 @@ export class RepliesView implements Component {
 	private format: AnswerFormat = "lines";
 	/** The key help card, shown over the tab `?` opened it from. */
 	private help = false;
+	/** Reads a text aloud through pi-reply-reader; undefined when it is not loaded, so `s` and its hint stay away. */
+	private readonly speak?: Speak;
 	private helpTop = 0;
 
 	constructor(
@@ -241,7 +246,9 @@ export class RepliesView implements Component {
 		done: (result?: ViewResult) => void,
 		direct?: Reply,
 		central?: Central,
+		speak?: Speak,
 	) {
+		this.speak = speak;
 		this.tui = tui;
 		this.theme = theme;
 		this.keybindings = keybindings;
@@ -325,6 +332,7 @@ export class RepliesView implements Component {
 			else if (kb.matches(data, "tui.select.pageDown") || matchesKey(data, "space")) this.scroll += page;
 			else if (matchesKey(data, "home")) this.scroll = 0;
 			else if (matchesKey(data, "end")) this.scroll = Number.MAX_SAFE_INTEGER;
+			else if (this.speak && matchesKey(data, "s")) this.speak(this.reply.ordinal, this.reply.text);
 			else return;
 		} else if (this.help) {
 			if (!this.helpInput(data)) return;
@@ -348,7 +356,11 @@ export class RepliesView implements Component {
 			else if (kb.matches(data, "tui.select.down")) this.moveSelection(1);
 			else if (kb.matches(data, "tui.select.pageUp")) this.moveSelection(-page);
 			else if (kb.matches(data, "tui.select.pageDown")) this.moveSelection(page);
-			else return;
+			else if (this.speak && matchesKey(data, "s")) {
+				const reply = this.rows[this.selected]?.reply;
+				if (!reply) return;
+				this.speak(reply.ordinal, reply.text);
+			} else return;
 		}
 		this.tui.requestRender();
 	}
@@ -611,6 +623,7 @@ export class RepliesView implements Component {
 		} else if (matchesKey(data, "u") && ask?.continues) {
 			this.act([{ action: "unlink", ask: ask.id, continues: ask.continues }]);
 		} else if (matchesKey(data, "o") && ask) this.open(ask.reply, ask.thread);
+		else if (this.speak && matchesKey(data, "s") && ask) this.speak(ask.ordinal, ask.text);
 		else if (matchesKey(data, "a") && ask && proposal && this.groupOf(row)) {
 			// A group row unfolds and arms first; the second `a` closes the whole group.
 			this.unfolded.add(ask.id);
@@ -648,6 +661,8 @@ export class RepliesView implements Component {
 		else if (kb.matches(data, "tui.select.pageDown")) move(page);
 		else if ((kb.matches(data, "tui.select.confirm") || matchesKey(data, "o")) && row?.kind === "ask") {
 			this.open(row.row.ask.reply, row.row.ask.thread);
+		} else if (this.speak && matchesKey(data, "s") && row?.kind === "ask") {
+			this.speak(row.row.ask.ordinal, row.row.ask.text);
 		} else if (matchesKey(data, "r") && row?.kind === "ask") {
 			// A chain closed together, so every member reopens.
 			this.act([...row.row.chain, row.row.ask].map((ask) => ({ action: "reopen", ask: ask.id })));
@@ -786,6 +801,7 @@ export class RepliesView implements Component {
 		const hints: Hint[] = [
 			["↑↓", "move"],
 			["enter", "open"],
+			...this.readHint(),
 			["esc", "close"],
 		];
 		return [top, ...visible, this.bottom(hints, "", width)];
@@ -890,6 +906,7 @@ export class RepliesView implements Component {
 			["y", "yes"],
 			["f", "format"],
 			["t", "triage"],
+			...this.readHint(),
 			["?", "help"],
 			["esc", "close"],
 		];
@@ -1014,12 +1031,22 @@ export class RepliesView implements Component {
 		const hints: Hint[] = [
 			["↑↓", "move"],
 			["enter", "open"],
+			...this.readHint(),
 			["esc", "close"],
 		];
 		return [top, ...visible, this.bottom(hints, "", width)];
 	}
 
 	// ── Key help ─────────────────────────────────────────────────────────────
+
+	/** The `s` hint, only while pi-reply-reader answers. */
+	private readHint(): Hint[] {
+		return this.speak ? [["s", "read"]] : [];
+	}
+
+	private readHelp(action: string): [key: string, action: string][] {
+		return this.speak ? [["s", `${action} (pi-reply-reader)`]] : [];
+	}
 
 	/**
 	 * Every key of the central, under the place it works in; a string is a section title, a note a muted
@@ -1040,6 +1067,7 @@ export class RepliesView implements Component {
 			{ note: "✓? like <ID>: looks answered by that closed ask; it stays open until you answer it or press x.", indent: true },
 			["u", "unlink the ask from its chain"],
 			["o", "open the reply that asks it"],
+			...this.readHelp("read the selected ask aloud"),
 			["t", "triage: ask the session model for ✦ proposals"],
 			["a", "accept the row's ✦ proposal; on a group, a twice closes the whole group"],
 			["n", "reject the row's ✦ triage proposal"],
@@ -1047,9 +1075,11 @@ export class RepliesView implements Component {
 			["⌫", "undo the last action"],
 			"Replies",
 			["enter", "open the reply"],
+			...this.readHelp("read the selected reply aloud"),
 			"Answered",
 			["enter, o", "open the reply"],
 			["r", "reopen the selected ask"],
+			...this.readHelp("read the selected ask aloud"),
 			["⌫", "undo the last action"],
 			"Every tab",
 			["↑↓, pgup/pgdn", "move"],
@@ -1060,6 +1090,7 @@ export class RepliesView implements Component {
 			["↑↓", "scroll"],
 			["pgup/pgdn, space", "page"],
 			["home/end", "jump to the top or the end"],
+			...this.readHelp("read the reply aloud"),
 			["esc, q", "back"],
 			{ note: `Asks: ${mode}` },
 		];
@@ -1184,6 +1215,7 @@ export class RepliesView implements Component {
 		const hints: Hint[] = [
 			["↑↓", "scroll"],
 			["pgup/pgdn", "page"],
+			...this.readHint(),
 			["esc", this.closeFromViewer ? "close" : "back"],
 		];
 		const position = body.length > height ? `${this.scroll + 1}-${end}/${body.length}` : "";

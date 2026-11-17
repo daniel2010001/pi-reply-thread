@@ -430,6 +430,18 @@ P12 · 3 replies: R1 prompt ⚠ · R2 job: tests · R3 worker: docs · alt+r
 The summary clears when the next prompt starts; the pending line stays until every ask is answered
 or dismissed. `Alt+R` opens the overlay.
 
+### Read aloud (with pi-reply-reader)
+
+When `pi-reply-reader` is loaded too, `s` reads aloud
+from the overlay, the same way `/read` does: in **Replies** and the reply viewer it reads the whole
+reply; in **Pending** and **Answered** it reads only the selected ask. The overlay stays open. The
+hint `s read` and the `?` lines show only while the reader answers; without it, `s` does nothing.
+
+The two packages do not depend on each other. On each open the overlay emits `reply-reader:ping`
+(`{ v: 1 }`) on Pi's shared event bus and shows `s` only if `reply-reader:ready` (`{ v: 1 }`) comes
+back; `s` then emits `reply-reader:read` with `{ v: 1, id, text }`, where `id` is the ordinal shown
+(`P12.R1` or `P12.R1.Q1`) and `text` the Markdown to read.
+
 ## Themes
 
 Every colour comes from the active Pi theme (frame `borderAccent`, prompts `userMessageBg`, selection

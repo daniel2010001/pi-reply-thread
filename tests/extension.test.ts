@@ -26,13 +26,34 @@ interface Shortcut {
 }
 
 /** `flag` is what `pi.getFlag("reply-thread-asks")` returns; Pi gives the default when the flag is not passed. */
-function load(flag: string | boolean | undefined = "section") {
+function load(flag: string | boolean | undefined = "section", options: { reader?: boolean } = {}) {
 	const appended: [string, unknown][] = [];
+	const reads: unknown[] = [];
+	const pings: unknown[] = [];
+	const listeners = new Map<string, ((data: unknown) => void)[]>();
+	const events = {
+		emit: (channel: string, data: unknown) => {
+			for (const listener of listeners.get(channel) ?? []) listener(data);
+		},
+		on: (channel: string, listener: (data: unknown) => void) => {
+			listeners.set(channel, [...(listeners.get(channel) ?? []), listener]);
+			return () => listeners.set(channel, (listeners.get(channel) ?? []).filter((other) => other !== listener));
+		},
+	};
+	// A fake pi-reply-reader: it answers each ping at once and records each read.
+	if (options.reader) {
+		events.on("reply-reader:ping", (data) => {
+			pings.push(data);
+			events.emit("reply-reader:ready", { v: 1 });
+		});
+		events.on("reply-reader:read", (data) => reads.push(data));
+	} else events.on("reply-reader:read", (data) => reads.push(data));
 	const flags = new Map<string, unknown>();
 	const commands = new Map<string, Command>();
 	const shortcuts = new Map<string, Shortcut>();
 	const handlers = new Map<string, Handler[]>();
 	const pi = {
+		events,
 		registerCommand: (name: string, options: Command) => commands.set(name, options),
 		registerShortcut: (key: string, options: Shortcut) => shortcuts.set(key, options),
 		on: (event: string, handler: Handler) => handlers.set(event, [...(handlers.get(event) ?? []), handler]),
@@ -47,7 +68,8 @@ function load(flag: string | boolean | undefined = "section") {
 	const emit = async (event: string, ctx: unknown) => {
 		for (const handler of handlers.get(event) ?? []) await handler({ type: event }, ctx);
 	};
-	return { commands, shortcuts, emit, appended, flags };
+	const listening = (channel: string) => listeners.get(channel)?.length ?? 0;
+	return { commands, shortcuts, emit, appended, flags, reads, pings, listening };
 }
 
 const KEYS: Record<string, string> = { "tui.select.confirm": "\r", "tui.select.cancel": "\x1b", "tui.select.down": "\x1b[B" };
@@ -872,5 +894,66 @@ describe("/replies triage", () => {
 		expect(one.notices).toEqual([["P1.R1 · a1b2c3d4 · 12:00 · prompt\n\nEncontré dos opciones. ¿Cuál preferís?", "info"]]);
 		expect([...pending.calls, ...one.calls, ...pending.confirms, ...one.confirms]).toEqual([]);
 		expect(appended).toEqual([]);
+	});
+});
+
+describe("reading aloud with pi-reply-reader", () => {
+	const hint = (lines: string[]) => lines.at(-1) ?? "";
+
+	it("s on the Replies tab reads the selected reply and keeps the overlay open", async () => {
+		const { shortcuts, reads, pings, appended, listening } = load("section", { reader: true });
+		const { ctx, seen, pastes, notices } = fakeCtx(branch, "tui", ["s"]);
+		void shortcuts.get("alt+r")!.handler(ctx);
+		expect(pings).toEqual([{ v: 1 }]);
+		expect(reads).toEqual([{ v: 1, id: "P1.R1", text: "Encontré dos opciones." }]);
+		expect(seen[1]).toEqual(seen[0]);
+		expect(hint(seen[0])).toContain("s read");
+		expect({ pastes, notices, appended }).toEqual({ pastes: [], notices: [], appended: [] });
+		expect(listening("reply-reader:ready")).toBe(0);
+	});
+
+	it("s in the reply viewer reads the open reply", async () => {
+		const { shortcuts, reads } = load("section", { reader: true });
+		const { ctx, seen } = fakeCtx(branch, "tui", ["tui.select.confirm", "s"]);
+		void shortcuts.get("alt+r")!.handler(ctx);
+		expect(seen[1][0]).toMatch(/^╭─ P1\.R1 /);
+		expect(reads).toEqual([{ v: 1, id: "P1.R1", text: "Encontré dos opciones." }]);
+		expect(hint(seen[1])).toContain("s read");
+	});
+
+	it("s in Pending reads only the selected ask, in Answered the selected closed ask", async () => {
+		branch[1] = assistant("Encontré dos opciones. ¿Cuál preferís?", { id: "a1b2c3d4" });
+		const pending = load("section", { reader: true });
+		const open = fakeCtx(branch, "tui", ["s"]);
+		void pending.shortcuts.get("alt+r")!.handler(open.ctx);
+		expect(open.seen[0][0]).toMatch(/^╭─ Pending /);
+		expect(pending.reads).toEqual([{ v: 1, id: "P1.R1.Q1", text: "Encontré dos opciones. ¿Cuál preferís?" }]);
+		expect(hint(open.seen[0])).toContain("s read");
+		expect({ pastes: open.pastes, appended: pending.appended }).toEqual({ pastes: [], appended: [] });
+		branch.push(user("> P1.R1.Q1: Encontré dos opciones. ¿Cuál preferís?\nLa primera."));
+		const answered = load("section", { reader: true });
+		const closed = fakeCtx(branch, "tui", ["\t", "s"]);
+		void answered.shortcuts.get("alt+r")!.handler(closed.ctx);
+		expect(closed.seen[1][0]).toMatch(/^╭─ Answered /);
+		expect(answered.reads).toEqual([{ v: 1, id: "P1.R1.Q1", text: "Encontré dos opciones. ¿Cuál preferís?" }]);
+	});
+
+	it("without pi-reply-reader, s does nothing and no hint shows", async () => {
+		branch[1] = assistant("Encontré dos opciones. ¿Cuál preferís?", { id: "a1b2c3d4" });
+		const { shortcuts, reads, listening } = load();
+		const { ctx, seen } = fakeCtx(branch, "tui", ["s", "?"]);
+		void shortcuts.get("alt+r")!.handler(ctx);
+		expect(reads).toEqual([]);
+		expect(hint(seen[0])).not.toContain("s read");
+		expect(seen[1].join("\n")).not.toContain("(pi-reply-reader)");
+		expect(listening("reply-reader:ready")).toBe(0);
+	});
+
+	it("the help lists s when pi-reply-reader is there", async () => {
+		branch[1] = assistant("Encontré dos opciones. ¿Cuál preferís?", { id: "a1b2c3d4" });
+		const { shortcuts } = load("section", { reader: true });
+		const { ctx, seen } = fakeCtx(branch, "tui", ["?"]);
+		void shortcuts.get("alt+r")!.handler(ctx);
+		expect(seen[1].join("\n")).toContain("(pi-reply-reader)");
 	});
 });
