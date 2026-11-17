@@ -76,7 +76,7 @@ reply an ordered and a unique ID, and keeps the open asks of earlier replies vis
 | T44 | S11 | [x] Triage sends the latest turn's system prompt (pi-claude-bridge, L71) | inline, test-first | `ae27ba8` |
 | T45 | S11 | [x] `a` on a repeat group: first `a` unfolds and arms, second `a` closes the whole group with the proposal (L73-L74) | gentle-ai-worker, test-first (context backstop) | `de96c20` |
 | T7 | S1-S6 | [x] README (English), command help, CHANGELOG | inline | `e9d0b1f` |
-| T46 | S12 | [x] `s` reads aloud through pi-reply-reader; ping on each open, hint and `?` lines only when ready; README, CHANGELOG | inline, test-first | (this commit) |
+| T46 | S12 | [x] `s` reads aloud through pi-reply-reader; ping on each open, hint and `?` lines only when ready; README, CHANGELOG | inline, test-first | `153bdf8` |
 
 ## Log
 
