@@ -436,6 +436,8 @@ When `pi-reply-reader` is loaded too, `s` reads aloud
 from the overlay, the same way `/read` does: in **Replies** and the reply viewer it reads the whole
 reply; in **Pending** and **Answered** it reads only the selected ask. The overlay stays open. The
 hint `s read` and the `?` lines show only while the reader answers; without it, `s` does nothing.
+While a reading plays, the first `Esc` stops it (Pi hands keys to the reader before the overlay)
+and the next one closes the overlay as usual.
 
 The two packages do not depend on each other. On each open the overlay emits `reply-reader:ping`
 (`{ v: 1 }`) on Pi's shared event bus and shows `s` only if `reply-reader:ready` (`{ v: 1 }`) comes
