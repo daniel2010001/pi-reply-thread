@@ -42,10 +42,10 @@ pi -e ./extensions/reply-thread.ts
 gsh -- -e ./extensions/reply-thread.ts   # Gentle Shell
 ```
 
-### Update from 0.1.x
+### Update from an older minor version
 
 While the package is below 1.0, `pi update` stays within the installed minor version: Pi records
-the package as `^0.1.0`, and that range never reaches 0.2.0. Move to the latest release once with npm,
+the package as, say, `^0.2.0`, and that range never reaches 0.3.0. Move to the latest release once with npm,
 in Pi's package directory; your settings do not change:
 
 ```sh
@@ -432,7 +432,8 @@ or dismissed. `Alt+R` opens the overlay.
 
 ### Read aloud (with pi-reply-reader)
 
-When `pi-reply-reader` is loaded too, `s` reads aloud
+When [pi-reply-reader](https://github.com/daniel2010001/pi-reply-reader) is loaded too
+(`pi install npm:pi-reply-reader`), `s` reads aloud
 from the overlay, the same way `/read` does: in **Replies** and the reply viewer it reads the whole
 reply; in **Pending** and **Answered** it reads only the selected ask. The overlay stays open. The
 hint `s read` and the `?` lines show only while the reader answers; without it, `s` does nothing.

@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-11-17)
 
 - With pi-reply-reader loaded, `s` reads aloud from the overlay: the whole reply in Replies and the
   reply viewer, only the selected ask in Pending and Answered. The overlay stays open; the `s read`
   hint and the `?` lines show only while the reader answers the `reply-reader:ping` on Pi's event bus.
+  Install it with `pi install npm:pi-reply-reader`; while a reading plays, the first `Esc` stops it.
 
 ## 0.2.0 (2026-10-26)
 
