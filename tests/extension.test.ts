@@ -341,6 +341,21 @@ describe("pending central", () => {
 		expect(notices).toEqual([]);
 	});
 
+	it("starts the paste on its own paragraph when the editor already holds text", async () => {
+		const { commands } = load();
+		const quote = "> P1.R1.Q1: Encontré dos opciones. ¿Cuál preferís?";
+		const paste = async (editor: string, keys = ["tui.select.confirm"]) => {
+			const { ctx, pastes } = fakeCtx(branch, "tui", keys, {}, editor);
+			await commands.get("replies")!.handler("", ctx);
+			return pastes;
+		};
+		expect(await paste("> P9.R1.Q1: otra\nR: sí")).toEqual([`\n\n${quote}\nR: `]);
+		expect(await paste("hola\n")).toEqual([`\n${quote}\nR: `]);
+		expect(await paste("hola\n\n")).toEqual([`${quote}\nR: `]);
+		expect(await paste("  \n")).toEqual([`${quote}\nR: `]);
+		expect(await paste("hola", ["f", "tui.select.confirm"])).toEqual([`\n${quote} → `]);
+	});
+
 	it("f writes the format as a reply-thread.format entry and the paste follows it", async () => {
 		const { commands, appended } = load();
 		const { ctx, pastes } = fakeCtx(branch, "tui", ["f", "tui.select.confirm"]);

@@ -57,6 +57,17 @@ function editorDraft(ctx: ExtensionContext): string {
 	return ctx.ui.getEditorText() ?? "";
 }
 
+/**
+ * The paste preceded by the line breaks it needs to start apart from the draft already in the editor:
+ * `breaks` newlines in all (a blank line for `R:` lines, one for the same-line format), none on an
+ * empty draft.
+ */
+function separated(draft: string, paste: string, breaks: number): string {
+	if (!draft.trim()) return paste;
+	const trailing = /\n*$/.exec(draft)?.[0].length ?? 0;
+	return "\n".repeat(Math.max(0, breaks - trailing)) + paste;
+}
+
 /** What pi-claude-bridge says when it does not know the system prompt it is given. */
 const CAPTURE_FAILURE = "prompt-capture:";
 
@@ -184,8 +195,10 @@ async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string)
 			new RepliesView(tui, theme, keybindings, threads, done, reply, central, readerSpeak(pi)),
 		{ overlay: true, overlayOptions: OVERLAY_OPTIONS },
 	);
-	if (typeof result === "string" && result) ctx.ui.pasteToEditor(result);
-	else if (typeof result === "object") await triage(pi, ctx);
+	if (typeof result === "string" && result) {
+		const format = answerFormat(ctx.sessionManager.getBranch());
+		ctx.ui.pasteToEditor(separated(editorDraft(ctx), result, format === "lines" ? 2 : 1));
+	} else if (typeof result === "object") await triage(pi, ctx);
 }
 
 /** How the model call ended: its reply text, its error, or undefined when cancelled. */

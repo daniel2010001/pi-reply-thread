@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Answering from the central while the editor already holds text starts the paste on its own
+  paragraph (a blank line before it in the `R:` format, a new line in the same-line format), so asks
+  pasted one at a time no longer run together after the previous `R: `.
 - Draft marks: an open ask your unsent editor text would close (its quote or its ID) shows `✎` in
   Pending, the title adds `· N in draft`, and `Enter`/`y` do not paste it again; when every ask to
   answer is already in the draft, the overlay closes without pasting. The `?` card explains `✎`.
