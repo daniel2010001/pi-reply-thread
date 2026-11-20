@@ -56,6 +56,14 @@ function textOf(content: Content): string {
 		.join("\n");
 }
 
+/** The text blocks of an assistant message, each trimmed, joined with a blank line; empty when it has none. */
+function contextOf(content: Content): string {
+	if (!Array.isArray(content)) return "";
+	return content
+		.flatMap((block) => (block.type === "text" && typeof block.text === "string" && block.text.trim() ? [block.text.trim()] : []))
+		.join("\n\n");
+}
+
 /**
  * gentle-agents wakes the session with a user-role message after a job or subagent ends. It is not a
  * prompt: the notice that came before it is the trigger of the next reply.
@@ -98,7 +106,7 @@ export function buildThreads(entries: readonly SessionEntry[], mode: AskMode = "
 	let pending: Trigger[] = [];
 	let prompts = 0;
 	/** Ask tool calls waiting for their result, by call ID. */
-	const calls = new Map<string, { name: string; arguments: unknown }>();
+	const calls = new Map<string, { name: string; arguments: unknown; context: string }>();
 	/** Dialogs shown while a tool ran, by its call ID, in order; its result closes them. */
 	const dialogs = new Map<string, DialogPause[]>();
 	/** Pauses answered since the last reply; the next final reply of the thread holds them. */
@@ -132,7 +140,10 @@ export function buildThreads(entries: readonly SessionEntry[], mode: AskMode = "
 			calls.delete(id);
 			dialogs.delete(id);
 			const result = { text: textOf(message.content), details: message.details, isError: message.isError };
-			if (call) paused.push(...pausesOf(call.name, call.arguments, result));
+			if (call) {
+				const asked = pausesOf(call.name, call.arguments, result);
+				paused.push(...(call.context ? asked.map((pause) => ({ ...pause, context: call.context })) : asked));
+			}
 			if (shown) paused.push(...shown.map((dialog) => dialogPause(dialog, result)));
 			continue;
 		}
@@ -158,9 +169,10 @@ export function buildThreads(entries: readonly SessionEntry[], mode: AskMode = "
 
 		if (message.role !== "assistant") continue;
 		if (Array.isArray(message.content)) {
+			const context = contextOf(message.content);
 			for (const block of message.content) {
 				if (block.type === "toolCall" && block.id && block.name && ASK_TOOLS.has(block.name)) {
-					calls.set(block.id, { name: block.name, arguments: block.arguments });
+					calls.set(block.id, { name: block.name, arguments: block.arguments, context });
 				}
 			}
 		}

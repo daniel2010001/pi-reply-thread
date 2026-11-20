@@ -14,6 +14,11 @@ export interface Pause {
 	options?: string[];
 	/** For a dialog shown while bash ran, the program name (never its arguments). */
 	program?: string;
+	/**
+	 * For an ask tool, the text of the assistant message that called it (its text blocks, trimmed, joined with a
+	 * blank line), shared by every pause of that message; absent when the message has no text and for other dialogs.
+	 */
+	context?: string;
 }
 
 /** Tools whose calls are dialogs with the user, read from the session. */

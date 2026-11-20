@@ -1,3 +1,4 @@
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it } from "vitest";
 import { indexRows } from "../src/format.ts";
 import { findReply } from "../src/lookup.ts";
@@ -380,5 +381,87 @@ describe("pauses: a dialog title with several lines", () => {
 		expect(thread.replies[0].pauses).toEqual([
 			{ text: "Allow recognized data-loss command? [bash: rm]", answer: "ran", tool: "bash", program: "rm" },
 		]);
+	});
+});
+
+describe("pauses: the context the ask call came with", () => {
+	it("keeps the text of the message that called the ask tool, trimmed, as the pause context", () => {
+		const [thread] = buildThreads([
+			user("config"),
+			toolCalls([{ id: "call-c", name: "ask_user_choice", arguments: CHOICE }], "\n  Revisé la config.\nHay dos sitios posibles.  \n"),
+			toolResultOf("call-c", "ask_user_choice", CHOICE_TEXT, { details: CHOICE_DETAILS }),
+			assistant("Listo.", { id: "fffffff1" }),
+		]);
+		const [reply] = thread.replies;
+		expect(reply.pauses).toEqual([
+			{
+				text: "¿Dónde versiono la config?",
+				answer: "Versioned in compose (recommended)",
+				tool: "ask_user_choice",
+				options: ["Versioned in compose (recommended)", "Aparte"],
+				context: "Revisé la config.\nHay dos sitios posibles.",
+			},
+		]);
+		expect(reply.text).toBe("Listo.");
+		expect(reply.openAsks).toEqual([]);
+		expect(questionIds(reply)).toEqual([{ ordinal: "P1.R1.Q1", id: "fffffff1.1", text: "¿Dónde versiono la config?" }]);
+	});
+
+	it("has no context key when the message that called the ask tool has no text or only blank text", () => {
+		const [thread] = buildThreads([
+			user("config"),
+			toolCalls([{ id: "call-c", name: "ask_user_choice", arguments: CHOICE }]),
+			toolResultOf("call-c", "ask_user_choice", CHOICE_TEXT, { details: CHOICE_DETAILS }),
+			toolCalls([{ id: "call-d", name: "ask_user_choice", arguments: CHOICE }], "  \n "),
+			toolResultOf("call-d", "ask_user_choice", CHOICE_TEXT, { details: CHOICE_DETAILS }),
+			assistant("Listo."),
+		]);
+		expect(thread.replies[0].pauses).toHaveLength(2);
+		for (const pause of thread.replies[0].pauses) expect("context" in pause).toBe(false);
+	});
+
+	it("shares the context between the questions and the ask calls of one message, joining its text blocks with a blank line", () => {
+		const message = toolCalls(
+			[
+				{ id: "call-q", name: "ask_user_question", arguments: QUESTIONS },
+				{ id: "call-c", name: "ask_user_choice", arguments: CHOICE },
+			],
+			"Encontré tres ramas viejas.",
+		) as SessionEntry & { message: { content: unknown[] } };
+		message.message.content.unshift({ type: "thinking", thinking: "no se muestra" });
+		message.message.content.splice(2, 0, { type: "text", text: "  Y la config está suelta.  " });
+		const [thread] = buildThreads([
+			user("limpiá"),
+			message,
+			toolResultOf("call-q", "ask_user_question", QUESTIONS_TEXT, { details: QUESTIONS_DETAILS }),
+			toolResultOf("call-c", "ask_user_choice", CHOICE_TEXT, { details: CHOICE_DETAILS }),
+			assistant("Listo."),
+		]);
+		expect(thread.replies[0].pauses.map((pause) => pause.context)).toEqual(
+			Array(4).fill("Encontré tres ramas viejas.\n\nY la config está suelta."),
+		);
+	});
+
+	it("takes the context only from the message that carries the call", () => {
+		const [thread] = buildThreads([
+			user("x"),
+			toolCalls([{ id: "call-c", name: "ask_user_choice", arguments: CHOICE }], "Primero esto."),
+			toolResultOf("call-c", "ask_user_choice", CHOICE_TEXT, { details: CHOICE_DETAILS }),
+			toolCalls([{ id: "call-d", name: "ask_user_choice", arguments: CHOICE }]),
+			toolResultOf("call-d", "ask_user_choice", CHOICE_TEXT, { details: CHOICE_DETAILS }),
+			assistant("Listo."),
+		]);
+		expect(thread.replies[0].pauses.map((pause) => pause.context)).toEqual(["Primero esto.", undefined]);
+	});
+
+	it("gives dialog pauses no context, even when the tool's message has text", () => {
+		const [thread] = buildThreads([
+			user("borrá"),
+			toolCalls([{ id: "call-b", name: "bash", arguments: { command: "rm -rf /tmp/x" } }], "Borro la carpeta temporal."),
+			customEntry("reply-thread.pause", { toolCallId: "call-b", toolName: "bash", kind: "confirm", title: "Allow?", program: "rm" }),
+			toolResultOf("call-b", "bash", ""),
+			assistant("Borrada."),
+		]);
+		expect(thread.replies[0].pauses).toEqual([{ text: "Allow? [bash: rm]", answer: "ran", tool: "bash", program: "rm" }]);
 	});
 });

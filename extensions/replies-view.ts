@@ -780,8 +780,9 @@ export class RepliesView implements Component {
 	}
 
 	/**
-	 * The question, its options with the chosen ones `✓`, the answer, the tool and the reply that ended the turn.
-	 * When it does not fit the cap, the options go first down to `… N more`, then the question down to 2 lines.
+	 * The context the ask came with, the question, its options with the chosen ones `✓`, the answer, the tool and
+	 * the reply that ended the turn. When it does not fit the cap, the context goes first (down to one cut line),
+	 * then the options down to `… N more`, then the question down to 2 lines.
 	 */
 	private renderCard(width: number): string[] {
 		const theme = this.theme;
@@ -794,17 +795,20 @@ export class RepliesView implements Component {
 		const chosen = (label: string) => label === pause.answer || parts.includes(label);
 		// The empty line, `Chose:`, `Tool:` and `In …`, and the `Options` title when there are options.
 		const fixed = 4 + (options.length ? 1 : 0);
+		const intro = this.cardContext(pause, content, body - question.length - fixed - options.length - 1);
+		const space = body - intro.length;
 		let shown = options.length;
-		if (question.length + fixed + options.length > body) {
-			const room = Math.max(1, body - fixed - question.length);
+		if (question.length + fixed + options.length > space) {
+			const room = Math.max(1, space - fixed - question.length);
 			if (room < options.length) shown = room - 1;
 		}
 		const more = options.length - shown;
-		const keep = Math.min(question.length, Math.max(2, body - fixed - shown - (more ? 1 : 0)));
+		const keep = Math.min(question.length, Math.max(2, space - fixed - shown - (more ? 1 : 0)));
 		const asked = question.slice(0, keep);
 		if (keep < question.length) asked[keep - 1] = truncateToWidth(`${asked[keep - 1]}…`, content, "…");
 		const program = pause.program ? ` · ${pause.program}` : "";
 		const lines = [
+			...intro,
 			...asked.map((line) => theme.fg("text", line)),
 			"",
 			...(options.length ? [theme.fg("muted", theme.bold("Options"))] : []),
@@ -827,6 +831,22 @@ export class RepliesView implements Component {
 			...lines.slice(0, Math.max(1, body)).map((line) => this.line(line, width)),
 			this.bottom(hints, "", width),
 		];
+	}
+
+	/**
+	 * The context lines of a pause card and the empty line under them, `muted`, in at most `room` lines of text:
+	 * cut to `room` lines ending in `…`, or to one cut line when no line fits. Nothing without a context.
+	 */
+	private cardContext(pause: Pause, content: number, room: number): string[] {
+		if (!pause.context) return [];
+		const wrapped = wrapTextWithAnsi(pause.context, Math.max(1, content));
+		let kept = wrapped;
+		if (room < 1) kept = ["… context above the question cut to fit"];
+		else if (room < wrapped.length) {
+			kept = wrapped.slice(0, room);
+			kept[room - 1] = truncateToWidth(`${kept[room - 1]}…`, content, "…");
+		}
+		return [...kept.map((line) => this.theme.fg("muted", line)), ""];
 	}
 
 	// ── Frame ────────────────────────────────────────────────────────────────

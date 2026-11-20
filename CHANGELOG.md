@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The pause card shows the context the agent wrote with an `ask_user_question` or `ask_user_choice`
+  call (the text of that same message) above the question, muted; on a short screen it is cut first,
+  down to `… context above the question cut to fit`. Answered rows, the viewer and question IDs do not
+  change; other dialogs have no context.
 - Answering from the central while the editor already holds text starts the paste on its own
   paragraph (a blank line before it in the `R:` format, a new line in the same-line format), so asks
   pasted one at a time no longer run together after the previous `R: `.

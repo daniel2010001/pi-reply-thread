@@ -2104,6 +2104,130 @@ describe("pause card", () => {
 		}
 	});
 
+	const CONTEXT_CHOICE = {
+		question: "¿Dónde versiono la config?",
+		options: [
+			{ label: "En compose", value: "compose" },
+			{ label: "Aparte", value: "apart" },
+		],
+	};
+	/** An ask_user_choice whose message says `context` before the call, then a guarded bash call whose message has text. */
+	const withContext = (context: string) => {
+		branch.push(
+			user("versioná la config"),
+			toolCalls([{ id: "call-c", name: "ask_user_choice", arguments: CONTEXT_CHOICE }], context),
+			toolResultOf("call-c", "ask_user_choice", "User selected: 1. En compose (value: compose)", {
+				details: { selection: { value: "compose", label: "En compose", index: 1 } },
+			}),
+			toolCalls([{ id: "call-b", name: "bash", arguments: { command: "rm -rf /tmp/x" } }], "Borro la carpeta temporal."),
+			customEntry("reply-thread.pause", { toolCallId: "call-b", toolName: "bash", kind: "confirm", title: "Allow?", program: "rm" }),
+			toolResultOf("call-b", "bash", ""),
+			assistant("Versionado.", { id: "abababab" }),
+		);
+	};
+	const TWO_LINES = "Hay dos sitios posibles para la config.\nEl compose ya tiene los **secretos**.";
+
+	it("shows the context of the ask call above the question, muted and as written, then an empty line", () => {
+		withContext(TWO_LINES);
+		const view = answered();
+		view.key("tui.select.confirm");
+		expect(view.text(W)).toEqual([
+			top("P4.R1.Q1 · pause"),
+			row("Hay dos sitios posibles para la config."),
+			row("El compose ya tiene los **secretos**."),
+			row(""),
+			row("¿Dónde versiono la config?"),
+			row(""),
+			row("Options"),
+			row("  ✓ En compose"),
+			row("  • Aparte"),
+			row("Chose: En compose"),
+			row("Tool: ask_user_choice"),
+			IN,
+			HINTS,
+		]);
+		const lines = view.lines(W);
+		expect(lines[1]).toContain(`${fg("muted")}Hay dos sitios`);
+		expect(lines[2]).toContain(`${fg("muted")}El compose`);
+		expect(lines[4]).toContain(`${fg("text")}¿Dónde versiono`);
+	});
+
+	it("wraps a long context to the width", () => {
+		withContext("Revisé el servidor de casa y la configuración puede vivir en el compose o en un repositorio aparte.");
+		const view = answered();
+		view.key("tui.select.confirm");
+		expect(view.text(40).slice(1, 6)).toEqual([
+			`│ ${"Revisé el servidor de casa y la".padEnd(36)} │`,
+			`│ ${"configuración puede vivir en el".padEnd(36)} │`,
+			`│ ${"compose o en un repositorio aparte.".padEnd(36)} │`,
+			`│ ${"".padEnd(36)} │`,
+			`│ ${"¿Dónde versiono la config?".padEnd(36)} │`,
+		]);
+	});
+
+	it("cuts the context first on a short screen, ending in …, then to one muted cut line before the options", () => {
+		withContext(TWO_LINES);
+		const one = answered(0, 16);
+		one.key("tui.select.confirm");
+		expect(one.text(W)).toEqual([
+			top("P4.R1.Q1 · pause"),
+			row("Hay dos sitios posibles para la config.…"),
+			row(""),
+			row("¿Dónde versiono la config?"),
+			row(""),
+			row("Options"),
+			row("  ✓ En compose"),
+			row("  • Aparte"),
+			row("Chose: En compose"),
+			row("Tool: ask_user_choice"),
+			IN,
+			HINTS,
+		]);
+		const none = answered(0, 15);
+		none.key("tui.select.confirm");
+		expect(none.text(W)).toEqual([
+			top("P4.R1.Q1 · pause"),
+			row("… context above the question cut to fit"),
+			row(""),
+			row("¿Dónde versiono la config?"),
+			row(""),
+			row("Options"),
+			row("  … 2 more"),
+			row("Chose: En compose"),
+			row("Tool: ask_user_choice"),
+			IN,
+			HINTS,
+		]);
+		expect(none.lines(W)[1]).toContain(`${fg("muted")}… context above the question cut to fit`);
+		for (const rows of [8, 12, 14, 20, 30]) {
+			const cap = Math.min(rows - 4, Math.floor(rows * 0.9));
+			const small = answered(0, rows);
+			small.key("tui.select.confirm");
+			for (const width of [40, W]) {
+				const lines = small.text(width);
+				expect(lines.length).toBeLessThanOrEqual(cap);
+				expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
+				expect(lines[0]).toMatch(/^╭─ P4\.R1\.Q1 · pause/);
+				expect(lines.at(-1)).toMatch(/^╰─/);
+			}
+		}
+	});
+
+	it("keeps a card without context as before: a dialog pause shows none even when its tool's message had text", () => {
+		withContext(TWO_LINES);
+		const view = answered(1);
+		view.key("tui.select.confirm");
+		expect(view.text(W)).toEqual([
+			top("P4.R1.Q2 · pause"),
+			row("Allow? [bash: rm]"),
+			row(""),
+			row("Chose: ran"),
+			row("Tool: bash · rm"),
+			IN,
+			HINTS,
+		]);
+	});
+
 	it("lists enter/o on a pause in the ? card under the Answered keys", () => {
 		const view = central(branch, { rows: 60 });
 		view.key("?");
