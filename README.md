@@ -416,6 +416,18 @@ The answer is read from the quote that closed the ask: the `R:` line under it, t
 the quote line, or the first line after it that is not a quote. A prompt that cites the ID without a
 quote, or has nothing after the quote, answers with its first line.
 
+### Dialogs (pauses)
+
+When the agent stops a turn to ask you in a dialog (`ask_user_question`, `ask_user_choice`), the
+session keeps the questions and what you chose. Each question becomes an ask of the reply that ends
+that turn, numbered after the reply's own asks (a reply with two asks in its text and a dialog of one
+question has `Q1`, `Q2` and the dialog's `Q3`), so no reply or earlier question changes its ID. These
+asks are closed from the start: they never show in Pending, the Answered tab shows them with
+`↳ chose: <your answer>` (the option, the selected options joined with `, `, or the text you typed),
+the viewer lists them under `✓ Answered` with `→ chose: <your answer>`, and `r` does not reopen them.
+A dialog whose turn ended without a reply (you interrupted it) is not shown, nor a call that failed
+validation.
+
 ### Widget
 
 A widget above the editor summarizes the latest prompt while it has two or more replies, with `⚠`

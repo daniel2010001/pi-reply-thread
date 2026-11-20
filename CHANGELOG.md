@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Dialogs that pause a turn (`ask_user_question`, `ask_user_choice`) show up as closed asks of the
+  reply that ends the turn, numbered after its own asks, with the answer you chose: `↳ chose: …` in
+  Answered, `→ chose: …` in the viewer. Reply and existing question IDs do not change.
+
 ## 0.3.0 (2026-11-17)
 
 - With pi-reply-reader loaded, `s` reads aloud from the overlay: the whole reply in Replies and the

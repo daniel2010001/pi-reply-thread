@@ -1,5 +1,6 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { type AskMode, detectOpenAsks } from "./asks.ts";
+import { ASK_TOOLS, type Pause, pausesOf } from "./pauses.ts";
 
 export type TriggerKind = "prompt" | "job" | "monitor" | "worker" | "session" | "other";
 
@@ -22,6 +23,11 @@ export interface Reply {
 	triggers: Trigger[];
 	/** Lines of this reply that wait on the user (questions, decisions); empty when none. */
 	openAsks: string[];
+	/**
+	 * Dialogs that paused the turn before this reply (`ask_user_question`, `ask_user_choice`), one per
+	 * question, with the answer given. Their question IDs follow the `openAsks` ones; empty when none.
+	 */
+	pauses: Pause[];
 }
 
 export interface Thread {
@@ -39,7 +45,7 @@ const FINISHED = new Set(["stop", "length"]);
 
 const PROMPT_TRIGGER: Trigger = { kind: "prompt", label: "prompt" };
 
-type Content = string | readonly { type: string; text?: string }[] | undefined;
+type Content = string | readonly { type: string; text?: string; id?: string; name?: string; arguments?: unknown }[] | undefined;
 
 function textOf(content: Content): string {
 	if (typeof content === "string") return content;
@@ -91,6 +97,10 @@ export function buildThreads(entries: readonly SessionEntry[], mode: AskMode = "
 	let current: Thread | undefined;
 	let pending: Trigger[] = [];
 	let prompts = 0;
+	/** Ask tool calls waiting for their result, by call ID. */
+	const calls = new Map<string, { name: string; arguments: unknown }>();
+	/** Pauses answered since the last reply; the next final reply of the thread holds them. */
+	let paused: Pause[] = [];
 
 	for (const entry of entries) {
 		if (entry.type === "custom_message") {
@@ -98,7 +108,23 @@ export function buildThreads(entries: readonly SessionEntry[], mode: AskMode = "
 			continue;
 		}
 		if (entry.type !== "message") continue;
-		const message = entry.message as { role?: string; content?: Content; stopReason?: string };
+		const message = entry.message as {
+			role?: string;
+			content?: Content;
+			stopReason?: string;
+			toolCallId?: string;
+			details?: unknown;
+			isError?: boolean;
+		};
+
+		if (message.role === "toolResult") {
+			const call = calls.get(message.toolCallId ?? "");
+			if (!call) continue;
+			calls.delete(message.toolCallId ?? "");
+			const result = { text: textOf(message.content), details: message.details, isError: message.isError };
+			paused.push(...pausesOf(call.name, call.arguments, result));
+			continue;
+		}
 
 		if (message.role === "user") {
 			if (textOf(message.content).startsWith(WAKE_PREFIX)) continue;
@@ -112,10 +138,21 @@ export function buildThreads(entries: readonly SessionEntry[], mode: AskMode = "
 			};
 			threads.push(current);
 			pending = [PROMPT_TRIGGER];
+			// A pause no reply followed belongs to an ended turn: it is not shown.
+			calls.clear();
+			paused = [];
 			continue;
 		}
 
-		if (message.role !== "assistant" || !FINISHED.has(message.stopReason ?? "")) continue;
+		if (message.role !== "assistant") continue;
+		if (Array.isArray(message.content)) {
+			for (const block of message.content) {
+				if (block.type === "toolCall" && block.id && block.name && ASK_TOOLS.has(block.name)) {
+					calls.set(block.id, { name: block.name, arguments: block.arguments });
+				}
+			}
+		}
+		if (!FINISHED.has(message.stopReason ?? "")) continue;
 		const text = textOf(message.content).trim();
 		if (!text) continue;
 
@@ -132,8 +169,10 @@ export function buildThreads(entries: readonly SessionEntry[], mode: AskMode = "
 			text,
 			triggers: pending,
 			openAsks: detectOpenAsks(text, mode),
+			pauses: paused,
 		});
 		pending = [];
+		paused = [];
 	}
 
 	return threads;

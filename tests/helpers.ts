@@ -119,3 +119,33 @@ export function customEntry(customType: string, data: unknown): SessionEntry {
 export function askEntry(data: Record<string, string>): SessionEntry {
 	return customEntry("reply-thread.ask", data);
 }
+
+/** An assistant message that calls tools and waits for their results (`stopReason` `toolUse`). */
+export function toolCalls(calls: { id: string; name: string; arguments: unknown }[], text = ""): SessionEntry {
+	const entry = assistant(text) as SessionEntry & { message: { content: unknown[]; stopReason: string } };
+	entry.message.content.push(...calls.map((call) => ({ type: "toolCall", ...call })));
+	entry.message.stopReason = "toolUse";
+	return entry;
+}
+
+/** The result of one tool call, as Pi stores it. */
+export function toolResultOf(
+	toolCallId: string,
+	toolName: string,
+	text: string,
+	options: { details?: unknown; isError?: boolean } = {},
+): SessionEntry {
+	return {
+		...base(),
+		type: "message",
+		message: {
+			role: "toolResult",
+			toolCallId,
+			toolName,
+			content: [{ type: "text", text }],
+			details: options.details ?? {},
+			isError: options.isError ?? false,
+			timestamp: clock,
+		},
+	} as SessionEntry;
+}

@@ -401,7 +401,8 @@ export class RepliesView implements Component {
 			const row = this.closings.get(ask.id);
 			if (!row) status.open.push(ask.text);
 			else {
-				const how = row.closedBy.kind === "answer" ? `→ P${row.closedBy.prompt.prompt}` : "dismissed";
+				const by = row.closedBy;
+				const how = by.kind === "answer" ? `→ P${by.prompt.prompt}` : by.kind === "pause" ? `→ chose: ${by.text}` : "dismissed";
 				status.closed.push({ text: ask.text, how });
 			}
 		}
@@ -663,7 +664,7 @@ export class RepliesView implements Component {
 			this.open(row.row.ask.reply, row.row.ask.thread);
 		} else if (this.speak && matchesKey(data, "s") && row?.kind === "ask") {
 			this.speak(row.row.ask.ordinal, row.row.ask.text);
-		} else if (matchesKey(data, "r") && row?.kind === "ask") {
+		} else if (matchesKey(data, "r") && row?.kind === "ask" && row.row.closedBy.kind !== "pause") {
 			// A chain closed together, so every member reopens.
 			this.act([...row.row.chain, row.row.ask].map((ask) => ({ action: "reopen", ask: ask.id })));
 		} else if (matchesKey(data, "backspace")) this.undo();
@@ -992,14 +993,15 @@ export class RepliesView implements Component {
 		const theme = this.theme;
 		const how = row.closedBy;
 		if (how.kind === "dismiss") return fit(`   ${theme.fg("dim", "✕ dismissed")}`, width);
+		if (how.kind === "pause") return fit(`   ${theme.fg("muted", `↳ chose: ${how.text}`)}`, width);
 		const answer = how.text ? `  ${how.text}` : "";
 		return fit(`   ${theme.fg("muted", `↳ P${how.prompt.prompt}${answer}`)}`, width);
 	}
 
 	private renderAnswered(width: number): string[] {
 		const theme = this.theme;
-		const answered = this.closed.filter((row) => row.closedBy.kind === "answer").length;
-		const detail = this.closed.length ? `${answered} answered · ${this.closed.length - answered} dismissed` : "";
+		const dismissed = this.closed.filter((row) => row.closedBy.kind === "dismiss").length;
+		const detail = this.closed.length ? `${this.closed.length - dismissed} answered · ${dismissed} dismissed` : "";
 		const top = this.top("Answered", detail, width);
 		const rows = this.answeredRows;
 		if (!rows.length) {

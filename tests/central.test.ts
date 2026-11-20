@@ -15,7 +15,7 @@ import type { AskMode } from "../src/asks.ts";
 import type { AnswerFormat } from "../src/format.ts";
 import { type AskAction, buildAsks } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
-import { askEntry, assistant, customEntry, resetIds, user } from "./helpers.ts";
+import { askEntry, assistant, customEntry, resetIds, toolCalls, toolResultOf, user } from "./helpers.ts";
 
 const KEYS: Record<string, string> = {
 	"tui.select.up": "\x1b[A",
@@ -1741,5 +1741,54 @@ describe("accepting a proposal on a repeat group", () => {
 		expect(rows[3]).toMatch(/^│ {14}✦ same as P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/);
 		expect(rows[4]).toMatch(/^│ ▌P1 /);
 		expect(rows.at(-1)).toMatch(HINTS);
+	});
+});
+
+describe("pauses in the central", () => {
+	const CHOICE = { question: "¿Dónde versiono la config?", options: [{ label: "En compose", value: "compose" }] };
+	const paused = () => {
+		branch.push(
+			user("versioná la config"),
+			toolCalls([{ id: "call-c", name: "ask_user_choice", arguments: CHOICE }]),
+			toolResultOf("call-c", "ask_user_choice", "User selected: 1. En compose (value: compose)", {
+				details: { selection: { value: "compose", label: "En compose", index: 1 } },
+			}),
+			assistant("Versionado.", { id: "dddddddd" }),
+		);
+	};
+
+	it("lists a pause in Answered as answered, with the answer chosen in the dialog", () => {
+		paused();
+		const view = central(branch, { tab: "replies" });
+		view.key("\t");
+		const rows = view.text(100);
+		expect(rows[0]).toMatch(/ 1 answered · 0 dismissed ─╮$/);
+		expect(rows.slice(1, 4)).toEqual([
+			expect.stringMatching(/^│ ▌P4  versioná la config +12:00 │$/),
+			expect.stringMatching(/^│ ›✓ P4\.R1\.Q1  ¿Dónde versiono la config\? +│$/),
+			expect.stringMatching(/^│ {4}↳ chose: En compose +│$/),
+		]);
+		expect(view.lines(100)[3]).toContain(fg("muted"));
+	});
+
+	it("r on a pause writes nothing: a dialog answer cannot reopen", () => {
+		paused();
+		const view = central(branch, { tab: "replies" });
+		view.key("\t");
+		view.key("r");
+		expect(view.actions).toEqual([]);
+		expect(view.text(100)[2]).toMatch(/^│ ›✓ P4\.R1\.Q1/);
+	});
+
+	it("shows the pause under ✓ Answered in the viewer header with the chosen answer", () => {
+		paused();
+		const view = central(branch, { tab: "replies" });
+		const index = view.text(100).findIndex((line) => line.includes("dddddddd"));
+		const steps = view.text(100).slice(0, index).filter((line) => /[├└] P/.test(line)).length;
+		for (let step = 0; step < steps; step += 1) view.key("tui.select.down");
+		view.key("tui.select.confirm");
+		const rows = view.text(100);
+		expect(rows[0]).toMatch(/^╭─ P4\.R1 /);
+		expect(rows).toContainEqual(expect.stringMatching(/^│ {3}• ¿Dónde versiono la config\?  → chose: En compose +│$/));
 	});
 });

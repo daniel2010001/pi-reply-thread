@@ -26,7 +26,7 @@ export function findReply(threads: readonly Thread[], id: string): Reply | undef
 	if (!question) return undefined;
 	const [, base, number] = question;
 	const asker = findOne(threads, base);
-	if (!asker || Number(number) > asker.openAsks.length) return undefined;
+	if (!asker || Number(number) > asker.openAsks.length + asker.pauses.length) return undefined;
 	const ordered = asker.ordinal.toLowerCase() === base.toLowerCase();
 	// The ordered form takes `.Q<n>`, the unique form a bare `.<n>`.
 	return ordered === /\.q\d+$/i.test(wanted) ? asker : undefined;

@@ -36,6 +36,7 @@ function reply(
 		text: `Reply ${index} of prompt ${prompt}.`,
 		triggers,
 		openAsks,
+		pauses: [],
 	};
 }
 

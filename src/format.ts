@@ -45,12 +45,13 @@ export function threadRow(thread: Thread): string {
 
 /**
  * `P12.R1  a1b2c3d4  prompt`, then `⚠` while the reply has an ask in `open` (unique IDs) and `✓` once all
- * of its asks are closed. Without `open`, `⚠` marks any reply with an ask.
+ * of its asks are closed. Without `open`, `⚠` marks any reply with an ask in its text, and `✓` one whose
+ * only asks are dialogs (always answered).
  */
 function markedRow(reply: Reply, open?: ReadonlySet<string>): string {
 	const row = `${reply.ordinal}  ${reply.entryId}  ${triggerText(reply.triggers)}`;
-	if (!reply.openAsks.length) return row;
-	if (!open) return `${row}  ⚠`;
+	if (!reply.openAsks.length && !reply.pauses.length) return row;
+	if (!open) return reply.openAsks.length ? `${row}  ⚠` : `${row}  ✓`;
 	return questionIds(reply).some((ask) => open.has(ask.id)) ? `${row}  ⚠` : `${row}  ✓`;
 }
 

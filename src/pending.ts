@@ -67,7 +67,11 @@ export interface PendingAsk extends Ask {
 }
 
 /** How a closed ask closed: a later prompt cited it, with the answer it gave, or the central dismissed it. */
-export type ClosedBy = { kind: "answer"; prompt: Thread; text: string } | { kind: "dismiss" };
+export type ClosedBy =
+	| { kind: "answer"; prompt: Thread; text: string }
+	| { kind: "dismiss" }
+	/** A dialog asked it during the turn and `text` is the answer chosen there; nothing reopens it. */
+	| { kind: "pause"; text: string };
 
 /** One closed row: an ask alone, or the newest member of a chain, with how the chain closed. */
 export interface ClosedAsk {
@@ -83,8 +87,9 @@ export interface AskState {
 	closed: ClosedAsk[];
 }
 
+/** The asks of a reply: its open asks, then the questions of the dialogs that paused its turn. */
 export function questionIds(reply: Reply): QuestionId[] {
-	return reply.openAsks.map((text, index) => ({
+	return [...reply.openAsks, ...reply.pauses.map((pause) => pause.text)].map((text, index) => ({
 		ordinal: `${reply.ordinal}.Q${index + 1}`,
 		id: `${reply.entryId}.${index + 1}`,
 		text,
@@ -269,11 +274,19 @@ export function buildAsks(entries: readonly SessionEntry[], threads = buildThrea
 	const continues = new Map<string, string>();
 	/** The proposal keys rejected for each ask. */
 	const rejected = new Map<string, Set<string>>();
+	/** Asks of dialogs: closed from the start, central actions never touch them. */
+	const paused = new Set<string>();
 
 	for (const [at, entry] of entries.entries()) {
 		const found = replies.get(entry.id);
 		if (found) {
-			for (const id of questionIds(found.reply)) asks.set(id.id, { ...id, ...found, seq: asks.size });
+			const ids = questionIds(found.reply);
+			for (const id of ids) asks.set(id.id, { ...id, ...found, seq: asks.size });
+			for (const [index, pause] of found.reply.pauses.entries()) {
+				const id = ids[found.reply.openAsks.length + index].id;
+				paused.add(id);
+				closed.set(id, { by: { kind: "pause", text: pause.answer }, at });
+			}
 			continue;
 		}
 		const thread = prompts.get(entry.id);
@@ -304,7 +317,7 @@ export function buildAsks(entries: readonly SessionEntry[], threads = buildThrea
 		if (entry.type !== "custom" || entry.customType !== ASK_ENTRY || !isAction(entry.data)) continue;
 		const action = entry.data;
 		const ask = asks.get(action.ask);
-		if (!ask) continue;
+		if (!ask || paused.has(ask.id)) continue;
 		if (action.action === "dismiss") {
 			if (!closed.has(ask.id)) closed.set(ask.id, { by: { kind: "dismiss" }, at });
 		} else if (action.action === "answer") {

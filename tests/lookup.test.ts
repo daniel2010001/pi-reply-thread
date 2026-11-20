@@ -11,6 +11,7 @@ function reply(prompt: number, index: number, entryId: string): Reply {
 		text: `reply ${prompt}.${index}`,
 		triggers: [],
 		openAsks: [],
+		pauses: [],
 	};
 }
 
