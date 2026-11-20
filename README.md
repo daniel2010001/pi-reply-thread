@@ -430,7 +430,8 @@ validation.
 
 Other dialogs count too: a confirm or select shown while a tool runs (a command guard's
 confirmation, a host-resolved review consent) is recorded as a `reply-thread.pause` entry with only
-its title, the tool and, for `bash`, the program name (the command's first word, never its
+its title, the tool and, for `bash`, the program name (the command's first word after any
+`NAME=value` assignments and a `sudo` or `env` without options, without its folder; never its
 arguments), for example `Allow this command? [bash: git]`; a dialog without a title shows as
 `confirm dialog [<tool>]`. Pi does not tell extensions which button was pressed, so the ask closes
 with the tool's outcome instead: `ran` when the tool finished without an error, else

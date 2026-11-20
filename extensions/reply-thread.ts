@@ -105,17 +105,28 @@ function readerSpeak(pi: ExtensionAPI): Speak | undefined {
 	return (id, text) => pi.events.emit(READER_READ, { v: 1, id, text });
 }
 
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
 /**
- * The program a bash call runs: the first word of its command after any leading `NAME=value`
- * assignments, never its arguments nor a variable's value.
+ * The program a bash call runs, named like pi-reply-reader does: the first word of its command after any
+ * leading `NAME=value` assignments (quoted values too) and a `sudo` or `env` with no options, without its
+ * folder. Never its arguments nor a variable's value.
  */
 function programOf(args: unknown): string | undefined {
 	const command = typeof args === "object" && args !== null ? (args as { command?: unknown }).command : undefined;
 	if (typeof command !== "string") return undefined;
-	return command
-		.trim()
-		.split(/\s+/)
-		.find((word) => word && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
+	const words = command.match(/(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s"'])+/g) ?? [];
+	let at = 0;
+	const skipAssignments = () => {
+		while (at < words.length && ASSIGNMENT.test(words[at])) at += 1;
+	};
+	skipAssignments();
+	while ((words[at] === "sudo" || words[at] === "env") && words[at + 1] && !words[at + 1].startsWith("-")) {
+		at += 1;
+		skipAssignments();
+	}
+	const word = words[at]?.replace(/["']/g, "");
+	return word?.split("/").pop() || undefined;
 }
 
 function isVersion1(data: unknown): boolean {

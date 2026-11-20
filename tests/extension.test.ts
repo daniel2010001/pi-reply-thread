@@ -1038,6 +1038,24 @@ describe("reply-thread extension: dialogs while a tool runs", () => {
 		]);
 	});
 
+	it("names the program like pi-reply-reader: quoted assignments, a bare sudo or env and the folder are skipped", async () => {
+		const { emit, appended } = load();
+		const { ctx } = fakeCtx(branch, "tui");
+		const commands = [
+			"FOO=1 sudo /usr/bin/git push",
+			"sudo -u x cmd",
+			`A="one two" B='x y' env C=3 ./run.sh --all`,
+			"env -i ls",
+			"sudo",
+		];
+		for (const [index, command] of commands.entries()) {
+			await emit("tool_execution_start", ctx, start(`call-${index}`, "bash", { command }));
+			await emit("ui_prompt_start", ctx, { reason: "ui_prompt", kind: "confirm", title: "Run?" });
+			await emit("tool_execution_end", ctx, { toolCallId: `call-${index}`, toolName: "bash", isError: false });
+		}
+		expect(appended.map(([, data]) => (data as { program?: string }).program)).toEqual(["git", "sudo", "run.sh", "env", "sudo"]);
+	});
+
 	it("closes the recorded dialog with the tool's outcome in the reply that ends the turn", async () => {
 		const { emit } = load();
 		branch.push(user("pusheá"), toolCalls([{ id: "call-b", name: "bash", arguments: { command: "git push" } }]));
