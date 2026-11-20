@@ -3,7 +3,9 @@ import { answerText } from "../src/format.ts";
 import {
 	buildAsks,
 	buildPending,
+	draftAsks,
 	groupLinks,
+	openIds,
 	looksAnsweredBy,
 	looksLikeAsk,
 	normalizeAsk,
@@ -834,5 +836,53 @@ describe("buildAsks: loose N: answers", () => {
 			["P2.R1.Q1", undefined],
 		]);
 		expect(asks.closed.map((row) => row.ask.ordinal)).toEqual(["P1.R1.Q1"]);
+	});
+});
+
+describe("draftAsks: the open asks a draft would close", () => {
+	const base = () => [
+		user("hola"),
+		assistant("¿Uno?\n\n¿Dos?", { id: "a1b2c3d4" }),
+		user("seguí"),
+		assistant("¿Tres?", { id: "b1b2c3d4" }),
+	];
+
+	it("finds an ask quoted by its text, even when the quote's ID names another one", () => {
+		expect(draftAsks(base(), "> P1.R1.Q2: ¿Dos?\nR: ")).toEqual(["a1b2c3d4.2"]);
+		expect(draftAsks(base(), "> P1.R1.Q1: ¿Tres? → sí")).toEqual(["b1b2c3d4.1"]);
+	});
+
+	it("finds an ask cited by its ordered or unique ID", () => {
+		expect(draftAsks(base(), "p1.r1.q1 sí, y b1b2c3d4.1 también")).toEqual(["a1b2c3d4.1", "b1b2c3d4.1"]);
+	});
+
+	it("leaves out a quote of a closed ask, and a draft that closes nothing is empty", () => {
+		const entries = [...base(), user("> P1.R1.Q1: ¿Uno?\nR: sí")];
+		expect(draftAsks(entries, "> P1.R1.Q1: ¿Uno?\nR: otra vez")).toEqual([]);
+		expect(draftAsks(entries, "")).toEqual([]);
+		expect(draftAsks(entries, "hola, ¿seguimos?")).toEqual([]);
+	});
+
+	it("names every member of a chain one member's quote closes", () => {
+		const entries = [...base(), askEntry({ action: "link", ask: "b1b2c3d4.1", continues: "a1b2c3d4.1" })];
+		expect(draftAsks(entries, "> P1.R1.Q1: ¿Uno?\nR: sí")).toEqual(["a1b2c3d4.1", "b1b2c3d4.1"]);
+	});
+
+	it("agrees with buildAsks when the same text is then sent as a prompt", () => {
+		const linked = [...base(), askEntry({ action: "link", ask: "b1b2c3d4.1", continues: "a1b2c3d4.1" })];
+		const drafts = [
+			"> P1.R1.Q2: ¿Dos?\nR: ",
+			"> P1.R1.Q1: ¿Tres? → sí",
+			"P1.R1.Q1 y a1b2c3d4.2",
+			"> P2.R1.Q1: ¿Uno?\nR: sí",
+			"nada que ver",
+		];
+		for (const entries of [base(), linked]) {
+			const before = openIds(buildAsks(entries).pending);
+			for (const draft of drafts) {
+				const after = openIds(buildAsks([...entries, user(draft)]).pending);
+				expect(draftAsks(entries, draft)).toEqual([...before].filter((id) => !after.has(id)).sort());
+			}
+		}
 	});
 });

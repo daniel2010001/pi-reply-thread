@@ -212,8 +212,8 @@ that look alike show as one row, on the newest of them (see [Repeated asks](#rep
 | Key | What it does |
 |---|---|
 | `↑`/`↓`, `PgUp`/`PgDn` | Move. |
-| `Space` | Marks or unmarks an ask (`●`; an unmarked ask shows `○`). |
-| `Enter` | Answers the marked asks, or the selected one: closes the overlay and pastes a `> P2.R1.Q1: <ask>` quote per ask into the editor, with room for your answer (see below). |
+| `Space` | Marks or unmarks an ask (`●`; an unmarked ask shows `○`, or `✎` when your draft already answers it). |
+| `Enter` | Answers the marked asks, or the selected one: closes the overlay and pastes a `> P2.R1.Q1: <ask>` quote per ask into the editor, with room for your answer (see below). Asks marked `✎` are not pasted again; when all of them are, it closes without pasting. |
 | `y` | The same, with `Yes.` as the answer. |
 | `f` | Switches the answer format between `R: lines` and `same line`; the `?` card shows the current one. |
 | `x` | Dismisses the marked asks, or the selected one. |
@@ -248,6 +248,18 @@ In the `same line` format the answer follows the quote after `→ `, one ask per
 ```
 
 The format is stored as a `reply-thread.format` custom entry on the branch; the latest one wins.
+
+### Draft and place
+
+Each time the overlay opens it reads what you have typed in the editor and not sent yet. An open ask
+that this draft would close if you sent it (its quote, or its ordered or unique ID) shows `✎` instead
+of `○`, also on a group row whose hidden similar ask is in the draft; the title adds `· N in draft`.
+`Enter` and `y` skip those asks, so nothing is pasted twice. The draft closes nothing: sending the
+message closes them as always.
+
+The overlay also reopens where you left it: each tab selects the same ask (or reply) again, or the
+row that took its place once that ask closed. The opening tab is chosen as before. The place lives in
+memory only and is forgotten when the session starts or switches and when the extension reloads.
 
 An ask closes only explicitly:
 

@@ -97,7 +97,14 @@ interface TriageSetup {
  * its last. A later overlay (Pending reopened after a triage) closes after its first frame.
  * A custom without options is the triage loader: it gets `loaderKeys` and resolves only through `done`.
  */
-function fakeCtx(branch: SessionEntry[], mode: "tui" | "print" = "print", keys: string[] = [], triage: TriageSetup = {}) {
+function fakeCtx(
+	branch: SessionEntry[],
+	mode: "tui" | "print" = "print",
+	keys: string[] = [],
+	triage: TriageSetup = {},
+	/** What `ctx.ui.getEditorText()` returns; without it, the UI has no such function. */
+	editor?: string,
+) {
 	const pastes: string[] = [];
 	const seen: string[][] = [];
 	const notices: [string, string | undefined][] = [];
@@ -151,6 +158,7 @@ function fakeCtx(branch: SessionEntry[], mode: "tui" | "print" = "print", keys: 
 				});
 			},
 			pasteToEditor: (text: string) => pastes.push(text),
+			...(editor === undefined ? {} : { getEditorText: () => editor }),
 		},
 		sessionManager: { getBranch: () => branch },
 	};
@@ -1079,5 +1087,65 @@ describe("reply-thread extension: dialogs while a tool runs", () => {
 		expect(buildThreads(branch).at(-1)?.replies[0].pauses).toEqual([
 			{ text: "Allow git push? [bash: git]", answer: "ran", tool: "bash", program: "git" },
 		]);
+	});
+});
+
+describe("draft and remembered place", () => {
+	beforeEach(() => {
+		branch = [
+			user("revisá el paquete"),
+			assistant("Listo.\n\n¿Borro la rama vieja?\n\n¿Publico la versión nueva?\n\n¿Actualizo el README del paquete?", {
+				id: "a1b2c3d4",
+			}),
+		];
+	});
+
+	/** The ordinal on the selected row of a frame, `›` in front of it. */
+	const selected = (frame: string[] | undefined) => frame?.map((line) => /^│ ›. (P\S+)/.exec(line)?.[1]).find(Boolean);
+
+	it("opens Pending on the first row and Enter pastes it, without a draft or a remembered place", async () => {
+		const { shortcuts } = load();
+		const { ctx, seen, pastes } = fakeCtx(branch, "tui", ["tui.select.confirm"], {}, "");
+		await shortcuts.get("alt+r")!.handler(ctx);
+		expect(seen[0][0]).toMatch(/^╭─ Pending ─+ 3 open · 0 linked ─╮$/);
+		expect(selected(seen[0])).toBe("P1.R1.Q1");
+		expect(pastes).toEqual(["> P1.R1.Q1: ¿Borro la rama vieja?\nR: "]);
+	});
+
+	it("reopens on the remembered ask, then on the same row after that ask closes", async () => {
+		const { shortcuts } = load();
+		const first = fakeCtx(branch, "tui", ["tui.select.down", "tui.select.cancel"]);
+		await shortcuts.get("alt+r")!.handler(first.ctx);
+		const again = fakeCtx(branch, "tui");
+		await shortcuts.get("alt+r")!.handler(again.ctx);
+		expect(selected(again.seen[0])).toBe("P1.R1.Q2");
+		branch.push(user("> P1.R1.Q2: ¿Publico la versión nueva?\nR: sí"));
+		const after = fakeCtx(branch, "tui");
+		await shortcuts.get("alt+r")!.handler(after.ctx);
+		expect(selected(after.seen[0])).toBe("P1.R1.Q3");
+	});
+
+	it("forgets the place on session_start", async () => {
+		const { shortcuts, emit } = load();
+		const first = fakeCtx(branch, "tui", ["tui.select.down", "tui.select.down", "tui.select.cancel"]);
+		await shortcuts.get("alt+r")!.handler(first.ctx);
+		await emit("session_start", first.ctx);
+		const again = fakeCtx(branch, "tui");
+		await shortcuts.get("alt+r")!.handler(again.ctx);
+		expect(selected(again.seen[0])).toBe("P1.R1.Q1");
+	});
+
+	it("reads the draft from the editor on each open: ✎ on its asks, and Enter does not paste them again", async () => {
+		const { commands } = load();
+		const draft = "> P1.R1.Q1: ¿Borro la rama vieja?\nR: sí";
+		const { ctx, seen, pastes } = fakeCtx(branch, "tui", ["tui.select.confirm"], {}, draft);
+		await commands.get("replies")!.handler("", ctx);
+		expect(seen[0][0]).toMatch(/^╭─ Pending ─+ 3 open · 0 linked · 1 in draft ─╮$/);
+		expect(seen[0][2]).toMatch(/^│ ›✎ P1\.R1\.Q1 /);
+		expect(seen[0][3]).toMatch(/^│  ○ P1\.R1\.Q2 /);
+		expect(pastes).toEqual([]);
+		const later = fakeCtx(branch, "tui", [], {}, "");
+		await commands.get("replies")!.handler("", later.ctx);
+		expect(later.seen[0][0]).toMatch(/ 3 open · 0 linked ─╮$/);
 	});
 });

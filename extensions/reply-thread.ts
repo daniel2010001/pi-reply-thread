@@ -4,10 +4,10 @@ import type { AskMode } from "../src/asks.ts";
 import { answerFormat, FORMAT_ENTRY, formatIndex, formatPending, formatReplyPlain, widgetLines } from "../src/format.ts";
 import { findReply, noMatchMessage } from "../src/lookup.ts";
 import { ASK_TOOLS, type DialogPause, PAUSE_ENTRY } from "../src/pauses.ts";
-import { ASK_ENTRY, type AskAction, buildAsks, buildPending, similarGroups, TRIAGE_ENTRY } from "../src/pending.ts";
+import { ASK_ENTRY, type AskAction, buildAsks, buildPending, draftAsks, similarGroups, TRIAGE_ENTRY } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
 import { parseTriage, triageRequest } from "../src/triage.ts";
-import { type Central, OVERLAY_OPTIONS, RepliesView, type Speak, type ViewResult } from "./replies-view.ts";
+import { type Central, OVERLAY_OPTIONS, type Place, RepliesView, type Speak, type ViewResult } from "./replies-view.ts";
 
 const WIDGET = "reply-thread";
 
@@ -47,6 +47,15 @@ function unknownMode(pi: ExtensionAPI): string | undefined {
  * recorded and refuses; the one read while a turn runs is the one it knows.
  */
 const turnPrompts = new WeakMap<ExtensionAPI, string>();
+
+/** Where the central of each loaded extension last closed; forgotten on `session_start` and on reload. */
+const places = new WeakMap<ExtensionAPI, Place>();
+
+/** The editor's unsent text, in the TUI only; empty when the UI cannot give it. */
+function editorDraft(ctx: ExtensionContext): string {
+	if (ctx.mode !== "tui" || typeof ctx.ui.getEditorText !== "function") return "";
+	return ctx.ui.getEditorText() ?? "";
+}
 
 /** What pi-claude-bridge says when it does not know the system prompt it is given. */
 const CAPTURE_FAILURE = "prompt-capture:";
@@ -163,7 +172,13 @@ async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string)
 		format: answerFormat(branch),
 		setFormat: (format) => pi.appendEntry(FORMAT_ENTRY, { format }),
 		mode,
+		draft: draftAsks(branch, editorDraft(ctx), threads, mode),
 	};
+	// `/replies <id>` opens the viewer as before: it neither restores nor moves the remembered place.
+	if (!reply) {
+		central.place = places.get(pi);
+		central.keep = (place) => places.set(pi, place);
+	}
 	const result = await ctx.ui.custom<ViewResult | undefined>(
 		(tui, theme, keybindings, done) =>
 			new RepliesView(tui, theme, keybindings, threads, done, reply, central, readerSpeak(pi)),
@@ -282,6 +297,7 @@ export default function replyThread(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
+		places.delete(pi);
 		const warning = unknownMode(pi);
 		if (warning && ctx.mode === "tui") ctx.ui.notify(warning, "warning");
 		refreshWidget(pi, ctx);

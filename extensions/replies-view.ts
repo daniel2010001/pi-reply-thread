@@ -63,6 +63,12 @@ type Hint = [key: string, action: string];
 
 export type Tab = "pending" | "replies" | "answered";
 
+/**
+ * Where each tab's selection was when the overlay closed: the selected ask's unique ID (Pending,
+ * Answered) or reply entry ID (Replies), and the row index, the fallback when that item is gone.
+ */
+export type Place = Partial<Record<Tab, { id?: string; index: number }>>;
+
 /** How the view closed with something to do: the text to paste, or `t` asking for a triage. */
 export type ViewResult = string | { triage: true };
 
@@ -81,6 +87,12 @@ export interface Central {
 	setFormat(format: AnswerFormat): void;
 	/** Which lines of a reply are asks, from `--reply-thread-asks`. */
 	mode: AskMode;
+	/** Unique IDs of the open asks the editor's draft already answers (`draftAsks`); marked `✎`, never pasted again. */
+	draft?: readonly string[];
+	/** Where the overlay was when it last closed; each tab selects it again. */
+	place?: Place;
+	/** Takes where the overlay is when it closes, any way. */
+	keep?(place: Place): void;
 }
 
 /**
@@ -279,6 +291,7 @@ export class RepliesView implements Component {
 		this.keybindings = keybindings;
 		this.done = (result) => {
 			this.finished = true;
+			this.central?.keep?.(this.place());
 			done(result);
 		};
 		this.central = central;
@@ -304,6 +317,45 @@ export class RepliesView implements Component {
 		);
 		this.closeFromViewer = Boolean(direct);
 		if (direct) this.open(direct);
+		if (central?.place) this.restore(central.place);
+	}
+
+	/** Each tab's selected item and row, for `Central.keep`. */
+	private place(): Place {
+		const pending = this.selectedAsk();
+		const answered = this.answeredRows[this.answeredSelected];
+		const id = (value?: string) => (value ? { id: value } : {});
+		return {
+			pending: { ...id(pending?.id), index: this.pendingSelected },
+			replies: { ...id(this.rows[this.selected]?.reply?.entryId), index: this.selected },
+			answered: { ...id(answered?.kind === "ask" ? answered.row.ask.id : undefined), index: this.answeredSelected },
+		};
+	}
+
+	/** Selects in each tab the row holding the remembered item, else the remembered row index clamped to the list. */
+	private restore(place: Place): void {
+		const { pending, replies, answered } = place;
+		if (pending) {
+			const ask = pending.id ? this.listOrder.find((one) => one.id === pending.id) : undefined;
+			// A hidden member of a repeat group is held by its group row.
+			const head = ask && this.groups.get(ask.id)?.at(-1);
+			const own = this.pendingRows.findIndex((row) => (row.kind === "ask" || row.kind === "member") && row.ask === ask);
+			const group = this.pendingRows.findIndex((row) => row.kind === "ask" && row.ask === head);
+			this.selectPending(own >= 0 ? own : group >= 0 ? group : pending.index);
+		}
+		const nearest = <T>(rows: readonly T[], index: number, ok: (row: T) => boolean) => {
+			const at = Math.min(Math.max(0, index), Math.max(0, rows.length - 1));
+			const next = rows.findIndex((row, offset) => offset >= at && ok(row));
+			return Math.max(0, next >= 0 ? next : rows.findLastIndex(ok));
+		};
+		if (replies) {
+			const at = this.rows.findIndex((row) => row.reply && row.reply.entryId === replies.id);
+			this.selected = nearest(this.rows, at >= 0 ? at : replies.index, (row) => Boolean(row.reply));
+		}
+		if (answered) {
+			const at = this.answeredRows.findIndex((row) => row.kind === "ask" && row.row.ask.id === answered.id);
+			this.answeredSelected = nearest(this.answeredRows, at >= 0 ? at : answered.index, (row) => row.kind === "ask");
+		}
 	}
 
 	/** Rows the whole view may use: never more than Pi's overlay cap, and at least the two borders and a row. */
@@ -509,6 +561,18 @@ export class RepliesView implements Component {
 		return row?.kind === "ask" || row?.kind === "member" ? row.ask : undefined;
 	}
 
+	/**
+	 * Whether a row's ask is in the draft: it or a member of its chain, and on a group row whose group is
+	 * folded (or with `group`), any hidden member too. Rows marked so show `✎` and are not pasted again.
+	 */
+	private inDraft(ask: PendingAsk, group = !this.unfolded.has(ask.id)): boolean {
+		const draft = this.central?.draft;
+		if (!draft?.length) return false;
+		const own = (one: PendingAsk) => [one, ...one.chain].some((member) => draft.includes(member.id));
+		const members = this.groups.get(ask.id);
+		return own(ask) || (group && members?.at(-1) === ask && members.some(own));
+	}
+
 	/** The marked asks in list order, collapsed members too, or the selected one when none is marked. */
 	private targets(): PendingAsk[] {
 		const marked = this.listOrder.filter((ask) => this.marked.has(ask.id));
@@ -621,7 +685,9 @@ export class RepliesView implements Component {
 		} else if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "y")) {
 			const targets = this.targets();
 			if (!targets.length) return false;
-			this.done(answerText(targets, matchesKey(data, "y"), this.format));
+			// Asks the draft already answers are not pasted again; with nothing left, it closes all the same.
+			const left = targets.filter((target) => !this.inDraft(target));
+			this.done(left.length ? answerText(left, matchesKey(data, "y"), this.format) : undefined);
 			return false;
 		} else if (matchesKey(data, "f")) {
 			this.format = this.format === "lines" ? "inline" : "lines";
@@ -927,7 +993,11 @@ export class RepliesView implements Component {
 		const text = truncateToWidth(ask.text, Math.max(0, room - visibleWidth(suffix)), "…");
 		const content = [
 			selected ? theme.fg("accent", "›") : " ",
-			this.marked.has(ask.id) ? theme.fg("accent", "●") : theme.fg("muted", "○"),
+			this.marked.has(ask.id)
+				? theme.fg("accent", "●")
+				: this.inDraft(ask)
+					? theme.fg("accent", "✎")
+					: theme.fg("muted", "○"),
 			" ",
 			theme.fg("accent", selected ? theme.bold(ordinal) : ordinal),
 			"  ",
@@ -951,7 +1021,11 @@ export class RepliesView implements Component {
 		const content = [
 			selected ? theme.fg("accent", "›") : " ",
 			"  ",
-			this.marked.has(ask.id) ? theme.fg("accent", "●") : theme.fg("muted", "≈"),
+			this.marked.has(ask.id)
+				? theme.fg("accent", "●")
+				: this.inDraft(ask)
+					? theme.fg("accent", "✎")
+					: theme.fg("muted", "≈"),
 			" ",
 			theme.fg("muted", selected ? theme.bold(ordinal) : ordinal),
 			"  ",
@@ -1009,7 +1083,9 @@ export class RepliesView implements Component {
 		// A repeat group counts once, as the row it shows on.
 		const heads = this.pending.filter((ask) => this.groups.get(ask.id)?.at(-1) === ask);
 		const linked = heads.filter((ask) => ask.chain.length).length;
-		const top = this.top("Pending", heads.length ? `${heads.length} open · ${linked} linked` : "", width);
+		const drafted = heads.filter((ask) => this.inDraft(ask, true)).length;
+		const draft = drafted ? ` · ${drafted} in draft` : "";
+		const top = this.top("Pending", heads.length ? `${heads.length} open · ${linked} linked${draft}` : "", width);
 		if (!this.pendingRows.length) {
 			return [
 				top,
@@ -1153,6 +1229,7 @@ export class RepliesView implements Component {
 			["y", "answer Yes."],
 			["f", `switch the answer format; now ${FORMAT_NAMES[this.format]}`],
 			["space", "mark or unmark an ask"],
+			["✎", "already in your draft (Enter will not paste it again)"],
 			["x", "dismiss the marked or selected asks"],
 			["→, ←", "expand or collapse the similar asks (≈) of a row"],
 			["l", "link the marked asks, or a row's similar asks to the oldest one"],

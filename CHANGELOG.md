@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Draft marks: an open ask your unsent editor text would close (its quote or its ID) shows `✎` in
+  Pending, the title adds `· N in draft`, and `Enter`/`y` do not paste it again; when every ask to
+  answer is already in the draft, the overlay closes without pasting. The `?` card explains `✎`.
+- The overlay reopens where you left it: each tab selects the same ask or reply, or the row that took
+  its place after it closed. Kept in memory, forgotten on session start and on reload.
 - Loose answers show up: when your prompt answers the previous reply's `## Needs your decision`
   items by number (`1: yes`, `2. later`, `3) no`), each line becomes a `✦ answered in P#: "<text>"`
   proposal on that item's ask, with no model call and nothing written; `a` accepts, `n` rejects,

@@ -279,6 +279,72 @@ export function buildAsks(
 	threads = buildThreads(entries),
 	mode: AskMode = "section",
 ): AskState {
+	return scanAsks(entries, threads, mode).state;
+}
+
+/**
+ * The unique IDs of the open asks a draft would close if it were sent as the next prompt, by the rules
+ * `buildAsks` applies to a prompt (a quote carrying an ask's text, or its ordered or unique ID cited),
+ * every member of a chain it closes, in branch order. Reads only; the draft closes nothing.
+ */
+export function draftAsks(
+	entries: readonly SessionEntry[],
+	draft: string,
+	threads = buildThreads(entries),
+	mode: AskMode = "section",
+): string[] {
+	if (!draft.trim()) return [];
+	const { state, known, isClosed } = scanAsks(entries, threads, mode);
+	const hit = new Set(promptCloses(draft, known, isClosed).map((one) => one.ask.id));
+	return state.pending
+		.map((row) => [...row.chain, row])
+		.filter((members) => members.some((member) => hit.has(member.id)))
+		.flat()
+		.sort((a, b) => a.seq - b.seq)
+		.map((ask) => ask.id);
+}
+
+/**
+ * The asks a prompt closes and the answer it gives each, in the order `buildAsks` closes them: first the
+ * quotes that carry an ask's text (`quotedAsk`), then the asks cited by ID outside those lines.
+ */
+function promptCloses(
+	prompt: string,
+	asks: readonly Ask[],
+	isClosed: (id: string) => boolean,
+): { ask: Ask; text: string }[] {
+	const lines = prompt.split("\n").map((line) => line.trim());
+	const closes: { ask: Ask; text: string }[] = [];
+	const now = new Set<string>();
+	const shut = (id: string) => now.has(id) || isClosed(id);
+	// A quote closes the ask whose text it carries, even when its ID now names another ask; the ID rule
+	// then skips that line.
+	const byText = new Set<number>();
+	for (const [index, line] of lines.entries()) {
+		const found = quotedAsk(line, asks, (ask) => !shut(ask.id));
+		if (!found) continue;
+		byText.add(index);
+		if (found.ask) {
+			closes.push({ ask: found.ask, text: answerAt(prompt, lines, index, found.arrow) });
+			now.add(found.ask.id);
+		}
+	}
+	const rest = lines.filter((_, index) => !byText.has(index)).join("\n");
+	for (const ask of asks) {
+		if (!shut(ask.id) && cites(rest, ask)) {
+			closes.push({ ask, text: answerOf(prompt, ask, byText) });
+			now.add(ask.id);
+		}
+	}
+	return closes;
+}
+
+/** `buildAsks`, with every ask seen and the closed state at the end of the branch, for `draftAsks`. */
+function scanAsks(
+	entries: readonly SessionEntry[],
+	threads: Thread[],
+	mode: AskMode,
+): { state: AskState; known: Ask[]; isClosed: (id: string) => boolean } {
 	const replies = new Map<string, { reply: Reply; thread: Thread }>();
 	const prompts = new Map<string, Thread>();
 	for (const thread of threads) {
@@ -318,24 +384,8 @@ export function buildAsks(
 		if (thread) {
 			const prompt = thread.promptText;
 			const lines = prompt.split("\n").map((line) => line.trim());
-			// A quote closes the ask whose text it carries, even when its ID now names another ask; the
-			// ID rule then skips that line.
-			const byText = new Set<number>();
-			const known = [...asks.values()];
-			for (const [index, line] of lines.entries()) {
-				const found = quotedAsk(line, known, (ask) => !closed.has(ask.id));
-				if (!found) continue;
-				byText.add(index);
-				if (found.ask) {
-					const text = answerAt(prompt, lines, index, found.arrow);
-					closed.set(found.ask.id, { by: { kind: "answer", prompt: thread, text }, at });
-				}
-			}
-			const rest = lines.filter((_, index) => !byText.has(index)).join("\n");
-			for (const ask of asks.values()) {
-				if (!closed.has(ask.id) && cites(rest, ask)) {
-					closed.set(ask.id, { by: { kind: "answer", prompt: thread, text: answerOf(prompt, ask, byText) }, at });
-				}
+			for (const { ask, text } of promptCloses(prompt, [...asks.values()], (id) => closed.has(id))) {
+				closed.set(ask.id, { by: { kind: "answer", prompt: thread, text }, at });
 			}
 			if (mode === "section" && previous && thread.entryId) {
 				loose.push(...looseAnswers(lines, previous.reply, previous.ids, thread.entryId, (id) => closed.has(id)));
@@ -416,7 +466,7 @@ export function buildAsks(
 		}
 		if (live) row.proposals = [...(row.proposals ?? []), live];
 	}
-	return { pending: rows, closed: done };
+	return { state: { pending: rows, closed: done }, known: [...asks.values()], isClosed: (id) => closed.has(id) };
 }
 
 /**

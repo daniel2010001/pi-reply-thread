@@ -10,7 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { RepliesView, type ViewResult } from "../extensions/replies-view.ts";
+import { type Place, RepliesView, type ViewResult } from "../extensions/replies-view.ts";
 import type { AskMode } from "../src/asks.ts";
 import type { AnswerFormat } from "../src/format.ts";
 import { type AskAction, buildAsks } from "../src/pending.ts";
@@ -50,10 +50,18 @@ function bg(token: ThemeBg): string {
 /** The central over a branch; `act` appends the entry as Pi would and rebuilds from the branch. */
 function central(
 	entries: SessionEntry[],
-	options: { rows?: number; tab?: "pending" | "replies"; format?: AnswerFormat; mode?: AskMode } = {},
+	options: {
+		rows?: number;
+		tab?: "pending" | "replies";
+		format?: AnswerFormat;
+		mode?: AskMode;
+		draft?: string[];
+		place?: Place;
+	} = {},
 ) {
 	let closed: { paste?: ViewResult } | undefined;
 	const actions: AskAction[] = [];
+	const kept: Place[] = [];
 	const formats: AnswerFormat[] = [];
 	const tui = { terminal: { rows: options.rows ?? 30 }, requestRender: () => {} } as unknown as TUI;
 	const act = (action: AskAction) => {
@@ -77,6 +85,9 @@ function central(
 			format: options.format ?? "lines",
 			setFormat: (format) => formats.push(format),
 			mode,
+			draft: options.draft,
+			place: options.place,
+			keep: (place) => kept.push(place),
 		},
 	);
 	const key = (data: string) => component.handleInput(KEYS[data] ?? data);
@@ -89,6 +100,7 @@ function central(
 		closed: () => closed,
 		actions,
 		formats,
+		kept,
 	};
 }
 
@@ -2099,5 +2111,100 @@ describe("pause card", () => {
 		const at = rows.findIndex((line) => /^│ {3}enter\/o on a pause opens its card +│$/.test(line));
 		expect(at).toBeGreaterThan(rows.findIndex((line) => /^│ Answered +│$/.test(line)));
 		expect(at).toBeLessThan(rows.findIndex((line) => /^│ Every tab +│$/.test(line)));
+	});
+});
+
+describe("draft marks", () => {
+	// Lines: 1 P3, 2 P3.R1.Q1 (its group hides P1.R1.Q1), 3 P1, 4 P1.R1.Q2; rows are one less.
+	it("marks ✎ in accent on a row whose ask is in the draft, and counts the rows in the title", () => {
+		const view = central(branch, { draft: ["a1b2c3d4.2"] });
+		const rows = view.text(120);
+		expect(rows[0]).toMatch(/^╭─ Pending ─+ 2 open · 0 linked · 1 in draft ─╮$/);
+		expect(rows[2]).toMatch(/^│ ›○ P3\.R1\.Q1 /);
+		expect(rows[4]).toMatch(/^│  ✎ P1\.R1\.Q2  Necesito tu OK para pushear\. +│$/);
+		expect(view.lines(120)[4]).toContain(`${fg("accent")}✎`);
+	});
+
+	it("marks a group row whose hidden member is in the draft; a marked row keeps ●", () => {
+		const view = central(branch, { draft: ["a1b2c3d4.1"] });
+		expect(view.text(120)[0]).toMatch(/ 2 open · 0 linked · 1 in draft ─╮$/);
+		expect(view.text(120)[2]).toMatch(/^│ ›✎ P3\.R1\.Q1 /);
+		view.key(" ");
+		expect(view.text(120)[2]).toMatch(/^│ ›● P3\.R1\.Q1 /);
+		view.key(RIGHT);
+		expect(view.text(120)[3]).toMatch(/^│ {4}✎ P1\.R1\.Q1 /);
+	});
+
+	it("Enter and y paste only the asks not in the draft", () => {
+		const enter = central(branch, { draft: ["a1b2c3d4.2"] });
+		enter.keys(" ", "tui.select.down", " ", "tui.select.confirm");
+		expect(enter.closed()).toEqual({ paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: " });
+		const yes = central(branch, { draft: ["a1b2c3d4.2"] });
+		yes.keys(" ", "tui.select.down", " ", "y");
+		expect(yes.closed()).toEqual({ paste: "> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: Yes." });
+	});
+
+	it("closes without a paste when every ask to answer is in the draft, and writes nothing", () => {
+		for (const key of ["tui.select.confirm", "y"]) {
+			const single = central(branch, { draft: ["a1b2c3d4.2"] });
+			single.keys("tui.select.down", key);
+			expect(single.closed()).toEqual({ paste: undefined });
+			const marked = central(branch, { draft: ["a1b2c3d4.1", "a1b2c3d4.2"] });
+			marked.keys(" ", "tui.select.down", " ", key);
+			expect(marked.closed()).toEqual({ paste: undefined });
+			expect(marked.actions).toEqual([]);
+		}
+	});
+
+	it("the key help explains ✎ under Pending", () => {
+		const view = central(branch, { rows: 60 });
+		view.key("?");
+		expect(view.text(120)).toContainEqual(
+			expect.stringMatching(/^│ {3}✎ +already in your draft \(Enter will not paste it again\) +│$/),
+		);
+	});
+});
+
+describe("remembered place", () => {
+	it("keeps each tab's selected item and row when it closes, any way", () => {
+		const view = central(branch);
+		view.keys("tui.select.down", "\t", "tui.select.down", "\t", "\t", "tui.select.cancel");
+		expect(view.kept).toEqual([
+			{
+				pending: { id: "a1b2c3d4.2", index: 3 },
+				replies: { id: "e5f6a7b8", index: 3 },
+				answered: { index: 0 },
+			},
+		]);
+		const answer = central(branch);
+		answer.key("tui.select.confirm");
+		expect(answer.kept).toEqual([expect.objectContaining({ pending: { id: "c9d0e1f2.1", index: 1 } })]);
+	});
+
+	it("selects the row holding the remembered ask, a group row for a hidden member", () => {
+		const view = central(branch, { place: { pending: { id: "a1b2c3d4.2", index: 1 } } });
+		expect(view.text()[4]).toMatch(/^│ ›○ P1\.R1\.Q2 /);
+		const hidden = central(branch, { place: { pending: { id: "a1b2c3d4.1", index: 3 } } });
+		expect(hidden.text()[2]).toMatch(/^│ ›○ P3\.R1\.Q1 /);
+	});
+
+	it("falls back to the remembered row index, clamped, when the ask is gone", () => {
+		branch.push(user("> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: sí"));
+		// P1.R1.Q1 is no longer hidden: rows 0 P1, 1 P1.R1.Q1, 2 P1.R1.Q2.
+		const view = central(branch, { place: { pending: { id: "c9d0e1f2.1", index: 1 } } });
+		expect(view.text()[2]).toMatch(/^│ ›○ P1\.R1\.Q1 /);
+		const clamped = central(branch, { place: { pending: { id: "gone.1", index: 40 } } });
+		expect(clamped.text()[3]).toMatch(/^│ ›○ P1\.R1\.Q2 /);
+	});
+
+	it("restores Replies by reply entry ID and Answered by ask ID", () => {
+		branch.push(askEntry({ action: "dismiss", ask: "a1b2c3d4.2" }), askEntry({ action: "dismiss", ask: "c9d0e1f2.1" }));
+		const view = central(branch, {
+			tab: "replies",
+			place: { replies: { id: "e5f6a7b8", index: 1 }, answered: { id: "a1b2c3d4.2", index: 0 } },
+		});
+		expect(view.text(100)).toContainEqual(expect.stringMatching(/^│ ›└ P2\.R1  e5f6a7b8 /));
+		view.key("\t");
+		expect(view.text(100)).toContainEqual(expect.stringMatching(/^│ ›✓ P1\.R1\.Q2 /));
 	});
 });
