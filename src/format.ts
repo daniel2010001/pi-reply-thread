@@ -91,11 +91,12 @@ export function formatReplyPlain(reply: Reply): string {
 /**
  * Widget lines: the latest thread while it has 2 or more replies, `⚠` on each reply with an ask still
  * open, and one line for the open asks (oldest first, a chain counted once, a group of repeats counted
- * once when `rows` gives the Pending row count). Undefined when there is nothing to show.
+ * once when `rows` gives the Pending row count), with `✦ N look answered` when N open rows have a
+ * proposal. Undefined when there is nothing to show.
  */
 export function widgetLines(
 	threads: readonly Thread[],
-	pending: readonly (QuestionId & { chain?: readonly QuestionId[] })[] = [],
+	pending: readonly (QuestionId & { chain?: readonly QuestionId[]; proposals?: readonly unknown[] })[] = [],
 	rows = pending.length,
 ): string[] | undefined {
 	const lines: string[] = [];
@@ -111,7 +112,9 @@ export function widgetLines(
 		lines.push(`P${thread.prompt} · ${thread.replies.length} replies: ${summary} · alt+r`);
 	}
 	const newest = pending.at(-1);
-	if (newest) lines.push(`⚠ ${rows} pending · newest: ${newest.ordinal} ${newest.text} · alt+r`);
+	const proposed = pending.filter((row) => row.proposals?.length).length;
+	const look = proposed ? ` · ✦ ${proposed} look answered` : "";
+	if (newest) lines.push(`⚠ ${rows} pending${look} · newest: ${newest.ordinal} ${newest.text} · alt+r`);
 	return lines.length ? lines : undefined;
 }
 

@@ -160,6 +160,16 @@ export function detectOpenAsks(text: string, mode: AskMode = "section"): string[
 	return scan(text, mode).asks;
 }
 
+/**
+ * The top-level list items of a reply's decision sections, cleaned as `detectOpenAsks` cleans them, in
+ * reply order and with repeats kept, so item N is the Nth one the reader sees. Empty without a section.
+ */
+export function decisionItems(text: string): string[] {
+	return candidates(text)
+		.filter((line) => line.kind === "item" && line.section !== undefined)
+		.map((line) => line.text);
+}
+
 /** How many asks `detectOpenAsks` leaves untracked outside the decision section in `section` mode; 0 in `all`. */
 export function untrackedAsks(text: string, mode: AskMode = "section"): number {
 	return scan(text, mode).untracked;

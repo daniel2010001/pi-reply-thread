@@ -1,4 +1,5 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { type AskMode, decisionItems } from "./asks.ts";
 import { buildThreads, type Reply, type Thread } from "./threads.ts";
 
 /** Custom entry type of the central's dismiss and link actions, written with `pi.appendEntry`. */
@@ -62,7 +63,10 @@ export interface PendingAsk extends Ask {
 	suggestion?: Ask;
 	/** The newest closed ask, chain members too, older than this row and like its text. Never closes it. */
 	looksAnswered?: Ask;
-	/** Triage proposals for this row's asks that still apply and were not rejected, in triage order. */
+	/**
+	 * Proposals for this row's asks that still apply and were not rejected: the triage ones in triage
+	 * order, then the loose `N:` answers in branch order.
+	 */
 	proposals?: LiveProposal[];
 }
 
@@ -250,16 +254,31 @@ function triageProposals(entries: readonly SessionEntry[]): Proposal[] {
  * that quotes an ask's text, or cites its ID, answers it, `reply-thread.ask` entries dismiss, reopen, link and unlink, later wins.
  * Answering or dismissing any member of a chain closes the whole chain.
  */
-export function buildPending(entries: readonly SessionEntry[], threads = buildThreads(entries)): PendingAsk[] {
-	return buildAsks(entries, threads).pending;
+export function buildPending(
+	entries: readonly SessionEntry[],
+	threads = buildThreads(entries),
+	mode: AskMode = "section",
+): PendingAsk[] {
+	return buildAsks(entries, threads, mode).pending;
 }
+
+/** A loose answer line of a prompt: `N: text`, `N. text` or `N) text`, trimmed. */
+const LOOSE = /^(\d+)\s*[:.)]\s+(\S.*)$/;
 
 /**
  * The open asks of a branch as `buildPending` builds them, and the closed ones, one row per chain,
  * oldest first. A closed chain keeps how its first member closed: the first prompt that cited it, or
  * the dismiss.
+ * In `section` mode (pass the mode `threads` was built with), each `N:` line of a prompt (not a quote
+ * nor an `R:` line) proposes its text as the answer to item N of the decision section of the reply
+ * right before the prompt, while that ask is open: a live `answered` proposal, like a triage one, that
+ * nothing writes by itself.
  */
-export function buildAsks(entries: readonly SessionEntry[], threads = buildThreads(entries)): AskState {
+export function buildAsks(
+	entries: readonly SessionEntry[],
+	threads = buildThreads(entries),
+	mode: AskMode = "section",
+): AskState {
 	const replies = new Map<string, { reply: Reply; thread: Thread }>();
 	const prompts = new Map<string, Thread>();
 	for (const thread of threads) {
@@ -276,11 +295,17 @@ export function buildAsks(entries: readonly SessionEntry[], threads = buildThrea
 	const rejected = new Map<string, Set<string>>();
 	/** Asks of dialogs: closed from the start, central actions never touch them. */
 	const paused = new Set<string>();
+	/** `answered` proposals of loose `N:` lines, in branch order. */
+	const loose: Proposal[] = [];
+	/** The last final reply on the branch so far, with the IDs of its asks. */
+	let previous: { reply: Reply; ids: QuestionId[] } | undefined;
 
 	for (const [at, entry] of entries.entries()) {
 		const found = replies.get(entry.id);
 		if (found) {
+			previous = { reply: found.reply, ids: [] };
 			const ids = questionIds(found.reply);
+			previous.ids = ids;
 			for (const id of ids) asks.set(id.id, { ...id, ...found, seq: asks.size });
 			for (const [index, pause] of found.reply.pauses.entries()) {
 				const id = ids[found.reply.openAsks.length + index].id;
@@ -311,6 +336,9 @@ export function buildAsks(entries: readonly SessionEntry[], threads = buildThrea
 				if (!closed.has(ask.id) && cites(rest, ask)) {
 					closed.set(ask.id, { by: { kind: "answer", prompt: thread, text: answerOf(prompt, ask, byText) }, at });
 				}
+			}
+			if (mode === "section" && previous && thread.entryId) {
+				loose.push(...looseAnswers(lines, previous.reply, previous.ids, thread.entryId, (id) => closed.has(id)));
 			}
 			continue;
 		}
@@ -369,11 +397,14 @@ export function buildAsks(entries: readonly SessionEntry[], threads = buildThrea
 
 	// A proposal shows on the open row that holds its ask, unless rejected or no longer true.
 	const rowOf = new Map(rows.flatMap((row) => [...row.chain, row].map((member) => [member.id, row] as const)));
-	for (const proposal of triageProposals(entries)) {
+	// Triage first: a loose answer the triage also proposed shows once, as the triage gave it.
+	const seen = new Set<string>();
+	for (const proposal of [...triageProposals(entries), ...loose]) {
 		const row = rowOf.get(proposal.ask);
 		const ask = asks.get(proposal.ask);
 		const key = proposalKey(proposal);
-		if (!row || !ask || rejected.get(ask.id)?.has(key)) continue;
+		if (!row || !ask || rejected.get(ask.id)?.has(key) || seen.has(`${ask.id} ${key}`)) continue;
+		seen.add(`${ask.id} ${key}`);
 		let live: LiveProposal | undefined;
 		if (proposal.kind === "answered") {
 			const prompt = prompts.get(proposal.prompt);
@@ -386,6 +417,31 @@ export function buildAsks(entries: readonly SessionEntry[], threads = buildThrea
 		if (live) row.proposals = [...(row.proposals ?? []), live];
 	}
 	return { pending: rows, closed: done };
+}
+
+/**
+ * The `answered` proposals of a prompt's loose `N:` lines (trimmed `lines`) for the reply right before
+ * it: item N of its decision sections names the open ask of that reply with that text.
+ */
+function looseAnswers(
+	lines: readonly string[],
+	reply: Reply,
+	ids: readonly QuestionId[],
+	prompt: string,
+	isClosed: (id: string) => boolean,
+): Proposal[] {
+	const items = decisionItems(reply.text);
+	if (!items.length) return [];
+	const own = ids.slice(0, reply.openAsks.length);
+	return lines.flatMap((line) => {
+		if (line.startsWith(">") || line.startsWith("R:")) return [];
+		const match = LOOSE.exec(line);
+		if (!match) return [];
+		const item = items[Number(match[1]) - 1];
+		const ask = item === undefined ? undefined : own.find((one) => one.text === item);
+		if (!ask || isClosed(ask.id)) return [];
+		return [{ kind: "answered" as const, ask: ask.id, prompt, quote: match[2].trim() }];
+	});
 }
 
 /** The newest closed ask any row of a repeat group looks like, hidden members too: the group's `✓?` mark. */

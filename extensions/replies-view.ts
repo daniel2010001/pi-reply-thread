@@ -1163,8 +1163,12 @@ export class RepliesView implements Component {
 			...this.readHelp("read the selected ask aloud"),
 			["t", "triage: ask the session model for ✦ proposals"],
 			["a", "accept the row's ✦ proposal; on a group, a twice closes the whole group"],
-			["n", "reject the row's ✦ triage proposal"],
+			["n", "reject the row's ✦ proposal"],
 			{ note: "✦ comes from /replies triage: a model's proposal; nothing closes or links until you press a.", indent: true },
+			{
+				note: '✦ also marks a loose "N: answer" line of your prompt to item N of the previous reply\'s decision section; no model.',
+				indent: true,
+			},
 			["⌫", "undo the last action"],
 			"Replies",
 			["enter", "open the reply"],

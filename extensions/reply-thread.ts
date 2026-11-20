@@ -58,8 +58,9 @@ function plural(count: number, one: string, many: string): string {
 function refreshWidget(pi: ExtensionAPI, ctx: ExtensionContext): void {
 	if (ctx.mode !== "tui") return;
 	const branch = ctx.sessionManager.getBranch();
-	const threads = buildThreads(branch, askMode(pi));
-	const pending = buildPending(branch, threads);
+	const mode = askMode(pi);
+	const threads = buildThreads(branch, mode);
+	const pending = buildPending(branch, threads, mode);
 	const lines = widgetLines(threads, pending, similarGroups(pending).length);
 	if (!lines) {
 		ctx.ui.setWidget(WIDGET, undefined, { placement: "aboveEditor" });
@@ -83,7 +84,8 @@ function act(pi: ExtensionAPI, ctx: ExtensionContext, action: AskAction) {
 	pi.appendEntry(ASK_ENTRY, action);
 	refreshWidget(pi, ctx);
 	const branch = ctx.sessionManager.getBranch();
-	return buildAsks(branch, buildThreads(branch, askMode(pi)));
+	const mode = askMode(pi);
+	return buildAsks(branch, buildThreads(branch, mode), mode);
 }
 
 /**
@@ -147,7 +149,7 @@ async function openReplies(pi: ExtensionAPI, ctx: ExtensionContext, arg: string)
 		ctx.ui.notify(noMatchMessage(arg), "error");
 		return;
 	}
-	const { pending, closed } = buildAsks(branch, threads);
+	const { pending, closed } = buildAsks(branch, threads, mode);
 	if (ctx.mode !== "tui") {
 		const text = pendingTab ? formatPending(pending) : reply ? formatReplyPlain(reply) : formatIndex(threads, pending);
 		ctx.ui.notify(text, "info");
@@ -184,8 +186,9 @@ async function triage(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
 		return;
 	}
 	const branch = ctx.sessionManager.getBranch();
-	const threads = buildThreads(branch, askMode(pi));
-	const state = buildAsks(branch, threads);
+	const mode = askMode(pi);
+	const threads = buildThreads(branch, mode);
+	const state = buildAsks(branch, threads, mode);
 	const request = triageRequest(state, threads);
 	if (!request) {
 		ctx.ui.notify("No open asks to triage.", "info");

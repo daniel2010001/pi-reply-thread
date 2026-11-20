@@ -509,6 +509,18 @@ describe("ask mode flag", () => {
 		expect(widget.notices).toEqual([]);
 	});
 
+	it("counts loose N: answers to the decision section as ✦ in the widget, only in section mode", async () => {
+		const loose = [user("go"), assistant(text, { id: "a1b2c3d4" }), user("1: yes\n2: later")];
+		const section = load();
+		const quiet = fakeCtx(loose, "tui");
+		await section.emit("session_start", quiet.ctx);
+		expect(widgetText(quiet.widgets[0][1])).toEqual(["⚠ 2 pending · ✦ 2 look answered · newest: P1.R1.Q2 Tag it · alt+r"]);
+		const all = load("all");
+		const every = fakeCtx(loose, "tui");
+		await all.emit("session_start", every.ctx);
+		expect(widgetText(every.widgets[0][1])).toEqual(["⚠ 3 pending · newest: P1.R1.Q3 Tag it · alt+r"]);
+	});
+
 	it("keeps the mode after a central action rebuilds the asks", async () => {
 		const { commands, appended } = load("all");
 		const { ctx, seen } = fakeCtx(branch, "tui", ["x", "tui.select.cancel"]);

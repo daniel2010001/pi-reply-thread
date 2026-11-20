@@ -199,6 +199,14 @@ describe("widgetLines", () => {
 		expect(widgetLines([p11, waiting])).toEqual(["P12 · 3 replies: R1 prompt · R2 job: tests · R3 worker: docs · alt+r"]);
 	});
 
+	it("counts the rows with a ✦ proposal after the pending count", () => {
+		const proposed = [asks[0], { ...asks[1], proposals: [{}] }, { ...asks[2], proposals: [{}, {}] }];
+		expect(widgetLines([p12, p11], proposed, 3)).toEqual([
+			"⚠ 3 pending · ✦ 2 look answered · newest: P12.R2.Q1 Needs your decision: merge? · alt+r",
+		]);
+		expect(widgetLines([p12, p11], [{ ...asks[0], proposals: [] }])).toEqual(["⚠ 1 pending · newest: P12.R1.Q1 ¿Cuál preferís? · alt+r"]);
+	});
+
 	it("shows the pending line alone while the latest thread has fewer than 2 replies", () => {
 		expect(widgetLines([p12, p11], asks.slice(0, 1))).toEqual(["⚠ 1 pending · newest: P12.R1.Q1 ¿Cuál preferís? · alt+r"]);
 	});

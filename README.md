@@ -221,7 +221,7 @@ that look alike show as one row, on the newest of them (see [Repeated asks](#rep
 | `→` / `←` | Expands a row with `≈ N similar` to show its similar asks under it / collapses it again. |
 | `l` / `u` | Links the marked asks (2 or more) as one chain, or the selected row and its similar asks to the oldest of them / unlinks the chain. |
 | `t` | Closes the overlay and runs the triage (see [Triage](#triage-optional-uses-your-session-model)); Pending reopens with its proposals. |
-| `a` / `n` | Accepts / rejects the row's `✦` triage proposal (see [Triage](#triage-optional-uses-your-session-model)). On a row with `≈ N similar`, the first `a` opens the group and the second closes the whole group with that proposal. |
+| `a` / `n` | Accepts / rejects the row's `✦` proposal (see [Loose answers](#loose-n-answers-no-model) and [Triage](#triage-optional-uses-your-session-model)). On a row with `≈ N similar`, the first `a` opens the group and the second closes the whole group with that proposal. |
 | `Backspace` (`⌫`) | Undoes the last `x`, `l`, `u`, `a` or `n` (see [Undo](#undo)). |
 | `Tab` | Goes to the next tab: Pending → Replies → Answered → Pending. |
 | `?` | Shows a card with every key of each tab; `?` or `Esc` hides it. |
@@ -254,6 +254,38 @@ An ask closes only explicitly:
 - **Answered**: a later prompt of yours quotes it or cites its ordered or unique ID, which is what the
   pasted quote does. Gentle Agents wake messages do not count.
 - **Dismissed** with `x`.
+
+### Loose `N:` answers (no model)
+
+When you answer the previous reply's [decision section](#needs-your-decision) by number instead of
+quoting it, each `N:` line becomes a `✦` proposal on item N of that section, with no model call:
+
+```
+## Needs your decision          ← the reply right before your prompt
+1. Should I start with T14?
+2. Do we publish now?
+
+1: yes                          ← your prompt
+2. not yet
+```
+
+```
+│ ›○ P1.R1.Q1  Should I start with T14?                                                  │
+│              ✦ answered in P2: "yes"                                                   │
+│  ○ P1.R1.Q2  Do we publish now?                                                        │
+│              ✦ answered in P2: "not yet"                                               │
+```
+
+- A line counts when it is `N: text`, `N. text` or `N) text`; N is the position of the item among the
+  section's top-level items, the same number the ask's `Q#` shows when the section is all items.
+- Only the reply right before the prompt counts, only when it has a decision section, and only in
+  `section` mode (the default). A line in a `>` quote or an `R:` line is not read; N past the last item,
+  or an ask already closed (also by a quote or ID in that same prompt), gives nothing.
+- Nothing closes by itself: `a` accepts it (the ask closes as answered by that prompt, with the text
+  after `N:`), `n` rejects it so it does not come back, `Backspace` undoes both, as with the
+  [triage](#triage-optional-uses-your-session-model) proposals. A triage proposal for the same ask and
+  prompt shows instead of it.
+- A line like `1: about part 1 of the plan` gives a wrong proposal too; `n` drops it.
 
 ### Undo
 
@@ -470,6 +502,9 @@ there are any:
 P12 · 3 replies: R1 prompt ⚠ · R2 job: tests · R3 worker: docs · alt+r
 ⚠ 4 pending · newest: P12.R1.Q1 I found two options. Which one do you prefer? · alt+r
 ```
+
+When open rows have a `✦` proposal (a [loose `N:` answer](#loose-n-answers-no-model) or a triage
+one), the pending line counts them: `⚠ 4 pending · ✦ 2 look answered · newest: … · alt+r`.
 
 The summary clears when the next prompt starts; the pending line stays until every ask is answered
 or dismissed. `Alt+R` opens the overlay.

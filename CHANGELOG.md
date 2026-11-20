@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Loose answers show up: when your prompt answers the previous reply's `## Needs your decision`
+  items by number (`1: yes`, `2. later`, `3) no`), each line becomes a `✦ answered in P#: "<text>"`
+  proposal on that item's ask, with no model call and nothing written; `a` accepts, `n` rejects,
+  `Backspace` undoes, as with triage proposals. `section` mode only; quotes and `R:` lines are not
+  read. The widget's pending line adds `✦ N look answered` while N open rows have a proposal.
 - Dialogs that pause a turn (`ask_user_question`, `ask_user_choice`) show up as closed asks of the
   reply that ends the turn, numbered after its own asks, with the answer you chose: `↳ chose: …` in
   Answered, `→ chose: …` in the viewer. Reply and existing question IDs do not change.

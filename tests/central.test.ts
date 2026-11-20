@@ -59,7 +59,7 @@ function central(
 	const act = (action: AskAction) => {
 		actions.push(action);
 		entries.push(askEntry(action as unknown as Record<string, string>));
-		return buildAsks(entries, buildThreads(entries, mode));
+		return buildAsks(entries, buildThreads(entries, mode), mode);
 	};
 	const mode = options.mode ?? "section";
 	const threads = buildThreads(entries, mode);
@@ -71,7 +71,7 @@ function central(
 		(paste?: ViewResult) => (closed = { paste }),
 		undefined,
 		{
-			...buildAsks(entries, threads),
+			...buildAsks(entries, threads, mode),
 			act,
 			tab: options.tab,
 			format: options.format ?? "lines",
@@ -1513,7 +1513,7 @@ describe("triage proposals", () => {
 
 	it("the key help lists a and n with the ✦ note under them and still fits the cap", () => {
 		const ACCEPT = /^│ {3}a +accept the row's ✦ proposal; on a group, a twice closes the whole group +│$/;
-		const REJECT = /^│ {3}n +reject the row's ✦ triage proposal +│$/;
+		const REJECT = /^│ {3}n +reject the row's ✦ proposal +│$/;
 		const NOTE = /^│ {3}✦ comes from \/replies triage: a model's proposal; nothing closes or links until you press a\. +│$/;
 		const wide = central(branch, { rows: 60 });
 		wide.key("?");
@@ -1577,6 +1577,65 @@ describe("triage proposals", () => {
 				}
 			}
 		}
+	});
+});
+
+describe("loose N: answers", () => {
+	const BACKSPACE = "\x7f";
+	/** P2 (entry bbbbbbb1) answers the two items of the decision section of P1.R1 with N: lines. */
+	const loose = () => [
+		user("arrancá"),
+		assistant("Hecho.\n\n## Needs your decision\n\n1. ¿Seguimos con T50?\n2. ¿Publicamos?", { id: "a1b2c3d4" }),
+		user("1: dale\n2: todavía no", "bbbbbbb1"),
+	];
+
+	it("shows each N: line as a ✦ proposal under its ask, and a closes the ask with that text", () => {
+		const view = central(loose());
+		expect(view.text(100).slice(1, -1)).toEqual([
+			expect.stringMatching(/^│ ▌P1  arrancá +12:00 │$/),
+			expect.stringMatching(/^│ ›○ P1\.R1\.Q1  ¿Seguimos con T50\? +│$/),
+			expect.stringMatching(/^│ {14}✦ answered in P2: "dale" +│$/),
+			expect.stringMatching(/^│  ○ P1\.R1\.Q2  ¿Publicamos\? +│$/),
+			expect.stringMatching(/^│ {14}✦ answered in P2: "todavía no" +│$/),
+		]);
+		view.key("a");
+		expect(view.actions).toEqual([{ action: "answer", ask: "a1b2c3d4.1", prompt: "bbbbbbb1", text: "dale" }]);
+		expect(view.text(100)[0]).toMatch(/ 1 open · 0 linked ─╮$/);
+		expect(view.text(100).some((line) => line.includes("P1.R1.Q1"))).toBe(false);
+		view.keys("\t", "\t");
+		const answered = view.text(100);
+		const at = answered.findIndex((line) => line.includes("P1.R1.Q1"));
+		expect(answered[at + 1]).toMatch(/^│ {4}↳ P2  dale +│$/);
+		view.key(BACKSPACE);
+		expect(view.actions.slice(1)).toEqual([{ action: "reopen", ask: "a1b2c3d4.1" }]);
+	});
+
+	it("n rejects a loose proposal by its key, and Backspace restores it", () => {
+		const view = central(loose());
+		view.keys("tui.select.down", "n");
+		expect(view.actions).toEqual([{ action: "reject", ask: "a1b2c3d4.2", proposal: "answered:bbbbbbb1" }]);
+		expect(view.text(100).filter((line) => line.includes("✦"))).toEqual([expect.stringMatching(/"dale"/)]);
+		view.key(BACKSPACE);
+		expect(view.actions.slice(1)).toEqual([{ action: "restore", ask: "a1b2c3d4.2", proposal: "answered:bbbbbbb1" }]);
+		expect(view.text(100).filter((line) => line.includes("✦"))).toHaveLength(2);
+	});
+
+	it("shows no loose proposal in all mode", () => {
+		expect(central(loose(), { mode: "all" }).text(100).some((line) => line.includes("✦"))).toBe(false);
+	});
+
+	it("explains loose N: answers in the ? card under the ✦ keys", () => {
+		const view = central(loose(), { rows: 60 });
+		view.key("?");
+		const rows = view.text(140);
+		const at = rows.findIndex((line) => /^│ {3}n +reject the row's ✦ proposal +│$/.test(line));
+		expect(at).toBeGreaterThan(0);
+		expect(rows.slice(at + 1, at + 3)).toEqual([
+			expect.stringMatching(/^│ {3}✦ comes from \/replies triage: a model's proposal; nothing closes or links until you press a\. +│$/),
+			expect.stringMatching(
+				/^│ {3}✦ also marks a loose "N: answer" line of your prompt to item N of the previous reply's decision section; no model\. +│$/,
+			),
+		]);
 	});
 });
 

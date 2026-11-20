@@ -726,3 +726,113 @@ describe("buildAsks: triage", () => {
 		expect(shown(stale)).toEqual([]);
 	});
 });
+
+describe("buildAsks: loose N: answers", () => {
+	const SECTION = "Hecho.\n\n## Needs your decision\n\n1. ¿Seguimos con T50?\n2. ¿Publicamos?";
+	const base = (text = SECTION) => [user("hola", "bbbbbbb0"), assistant(text, { id: "aaaaaaa1" })];
+	const shown = (entries: Parameters<typeof buildAsks>[0], mode: "section" | "all" = "section") =>
+		buildAsks(entries, buildThreads(entries, mode), mode).pending.flatMap((row) =>
+			(row.proposals ?? []).map((proposal) =>
+				proposal.kind === "answered"
+					? [row.ordinal, proposal.key, proposal.ask.ordinal, `P${proposal.prompt.prompt}`, proposal.quote]
+					: [row.ordinal, proposal.key, proposal.ask.ordinal, proposal.as.ordinal],
+			),
+		);
+
+	it("proposes each N: line of a prompt as the answer to item N of the previous reply's decision section", () => {
+		const entries = [...base(), user("1: sí\n2: no", "bbbbbbb1")];
+		expect(shown(entries)).toEqual([
+			["P1.R1.Q1", "answered:bbbbbbb1", "P1.R1.Q1", "P2", "sí"],
+			["P1.R1.Q2", "answered:bbbbbbb1", "P1.R1.Q2", "P2", "no"],
+		]);
+		expect(buildAsks(entries).closed).toEqual([]);
+		expect(buildPending(entries).map((ask) => ask.ordinal)).toEqual(["P1.R1.Q1", "P1.R1.Q2"]);
+	});
+
+	it("reads the 1. and 1) forms, counts the items by position and skips N out of range", () => {
+		const bullets = "## Needs your decision\n\n- Merge now\n- Tag it";
+		expect(shown([...base(bullets), user("intro\n1. dale\n2) después\n3: ¿y esto?\n0: nada", "bbbbbbb1")])).toEqual([
+			["P1.R1.Q1", "answered:bbbbbbb1", "P1.R1.Q1", "P2", "dale"],
+			["P1.R1.Q2", "answered:bbbbbbb1", "P1.R1.Q2", "P2", "después"],
+		]);
+		expect(shown([...base(), user("3: tal vez", "bbbbbbb1")])).toEqual([]);
+	});
+
+	it("ignores N: inside a > quote line or an R: line", () => {
+		expect(shown([...base(), user("> 1: sí\nR: 2: no", "bbbbbbb1")])).toEqual([]);
+	});
+
+	it("gives nothing for an ask the same prompt already closed by a quote or its ID", () => {
+		const quoted = [...base(), user("> P1.R1.Q1: ¿Seguimos con T50?\nR: sí\n\n1: sí\n2: no", "bbbbbbb1")];
+		expect(shown(quoted)).toEqual([["P1.R1.Q2", "answered:bbbbbbb1", "P1.R1.Q2", "P2", "no"]]);
+		expect(buildAsks(quoted).closed.map((row) => row.ask.ordinal)).toEqual(["P1.R1.Q1"]);
+		const cited = [...base(), user("P1.R1.Q2 no\n1: sí\n2: no", "bbbbbbb1")];
+		expect(shown(cited)).toEqual([["P1.R1.Q1", "answered:bbbbbbb1", "P1.R1.Q1", "P2", "sí"]]);
+	});
+
+	it("gives nothing after a reply without a decision section, or in all mode", () => {
+		expect(shown([...base("¿Seguimos con T50?\n\n¿Publicamos?"), user("1: sí\n2: no", "bbbbbbb1")])).toEqual([]);
+		expect(shown([...base(), user("1: sí\n2: no", "bbbbbbb1")], "all")).toEqual([]);
+	});
+
+	it("only reads the reply right before the prompt", () => {
+		const older = [...base(), user("ok", "bbbbbbb1"), assistant("Listo.", { id: "aaaaaaa2" }), user("1: sí", "bbbbbbb2")];
+		expect(shown(older)).toEqual([]);
+		const sameThread = [...base(), assistant("Tests en verde.", { id: "aaaaaaa2" }), user("1: sí", "bbbbbbb1")];
+		expect(shown(sameThread)).toEqual([]);
+		const newer = [
+			...base(),
+			user("ok", "bbbbbbb1"),
+			assistant("## Needs your decision\n\n1. ¿Borro la rama?", { id: "aaaaaaa2" }),
+			user("1: sí", "bbbbbbb2"),
+		];
+		expect(shown(newer)).toEqual([["P2.R1.Q1", "answered:bbbbbbb2", "P2.R1.Q1", "P3", "sí"]]);
+	});
+
+	it("hides a rejected loose proposal", () => {
+		const entries = [
+			...base(),
+			user("1: sí\n2: no", "bbbbbbb1"),
+			askEntry({ action: "reject", ask: "aaaaaaa1.1", proposal: "answered:bbbbbbb1" }),
+		];
+		expect(shown(entries)).toEqual([["P1.R1.Q2", "answered:bbbbbbb1", "P1.R1.Q2", "P2", "no"]]);
+	});
+
+	it("shows a triage proposal and a loose one for the same ask and prompt once, the triage one first", () => {
+		const triage = customEntry("reply-thread.triage", {
+			model: "test/model",
+			proposals: [{ kind: "answered", ask: "aaaaaaa1.1", prompt: "bbbbbbb1", quote: "1: sí" }],
+		});
+		expect(shown([...base(), user("1: sí\n2: no", "bbbbbbb1"), triage])).toEqual([
+			["P1.R1.Q1", "answered:bbbbbbb1", "P1.R1.Q1", "P2", "1: sí"],
+			["P1.R1.Q2", "answered:bbbbbbb1", "P1.R1.Q2", "P2", "no"],
+		]);
+	});
+
+	it("closes the ask through an answer action with the loose text", () => {
+		const entries = [
+			...base(),
+			user("1: sí\n2: no", "bbbbbbb1"),
+			askEntry({ action: "answer", ask: "aaaaaaa1.1", prompt: "bbbbbbb1", text: "sí" }),
+		];
+		expect(shown(entries)).toEqual([["P1.R1.Q2", "answered:bbbbbbb1", "P1.R1.Q2", "P2", "no"]]);
+		expect(buildAsks(entries).closed[0].closedBy).toMatchObject({ kind: "answer", text: "sí", prompt: { prompt: 2 } });
+	});
+
+	it("builds the same asks as before for a branch with no N: lines", () => {
+		const entries = [
+			...base(),
+			user("> P1.R1.Q1: ¿Seguimos con T50?\nR: sí", "bbbbbbb1"),
+			assistant("## Needs your decision\n\n1. ¿Borro la rama?", { id: "aaaaaaa2" }),
+			user("dale", "bbbbbbb2"),
+		];
+		const threads = buildThreads(entries);
+		const asks = buildAsks(entries, threads);
+		expect(asks).toEqual(buildAsks(entries, threads, "all"));
+		expect(asks.pending.map((row) => [row.ordinal, row.proposals])).toEqual([
+			["P1.R1.Q2", undefined],
+			["P2.R1.Q1", undefined],
+		]);
+		expect(asks.closed.map((row) => row.ask.ordinal)).toEqual(["P1.R1.Q1"]);
+	});
+});
