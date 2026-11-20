@@ -7,7 +7,7 @@ import replyThread from "../extensions/reply-thread.ts";
 import { buildAsks } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
 import { triageRequest } from "../src/triage.ts";
-import { askEntry, assistant, customEntry, jobNotice, resetIds, user } from "./helpers.ts";
+import { askEntry, assistant, customEntry, jobNotice, resetIds, toolCalls, toolResultOf, user } from "./helpers.ts";
 
 // The triage loader draws its key hint with Pi's global theme.
 beforeAll(() => initTheme("dark", false));
@@ -65,8 +65,8 @@ function load(flag: string | boolean | undefined = "section", options: { reader?
 		},
 	};
 	replyThread(pi as unknown as ExtensionAPI);
-	const emit = async (event: string, ctx: unknown) => {
-		for (const handler of handlers.get(event) ?? []) await handler({ type: event }, ctx);
+	const emit = async (event: string, ctx: unknown, data: Record<string, unknown> = {}) => {
+		for (const handler of handlers.get(event) ?? []) await handler({ type: event, ...data }, ctx);
 	};
 	const listening = (channel: string) => listeners.get(channel)?.length ?? 0;
 	return { commands, shortcuts, emit, appended, flags, reads, pings, listening };
@@ -955,5 +955,97 @@ describe("reading aloud with pi-reply-reader", () => {
 		const { ctx, seen } = fakeCtx(branch, "tui", ["?"]);
 		void shortcuts.get("alt+r")!.handler(ctx);
 		expect(seen[1].join("\n")).toContain("(pi-reply-reader)");
+	});
+});
+
+describe("reply-thread extension: dialogs while a tool runs", () => {
+	const start = (toolCallId: string, toolName: string, args: unknown = {}) => ({ toolCallId, toolName, args });
+
+	it("records a confirm during bash with its title, the tool and the program name only", async () => {
+		const { emit, appended } = load();
+		const { ctx } = fakeCtx(branch, "tui");
+		await emit("tool_execution_start", ctx, start("call-b", "bash", { command: "  git push origin main --tags" }));
+		await emit("ui_prompt_start", ctx, { reason: "ui_prompt", kind: "confirm", title: "Run a guarded command?" });
+		expect(appended).toStrictEqual([
+			[
+				"reply-thread.pause",
+				{ toolCallId: "call-b", toolName: "bash", kind: "confirm", title: "Run a guarded command?", program: "git" },
+			],
+		]);
+	});
+
+	it("records a dialog during another tool without a program, and without a title when it has none", async () => {
+		const { emit, appended } = load();
+		const { ctx } = fakeCtx(branch, "tui");
+		await emit("tool_execution_start", ctx, start("call-w", "write", { path: "a.ts", command: "nope" }));
+		await emit("ui_prompt_start", ctx, { reason: "ui_prompt", kind: "select" });
+		expect(appended).toStrictEqual([["reply-thread.pause", { toolCallId: "call-w", toolName: "write", kind: "select" }]]);
+	});
+
+	it("takes the newest tool still running that is not an ask tool", async () => {
+		const { emit, appended } = load();
+		const { ctx } = fakeCtx(branch, "tui");
+		await emit("tool_execution_start", ctx, start("call-1", "bash", { command: "ls -la" }));
+		await emit("tool_execution_start", ctx, start("call-2", "edit", {}));
+		await emit("tool_execution_start", ctx, start("call-3", "ask_user_question", { questions: [] }));
+		await emit("ui_prompt_start", ctx, { reason: "ui_prompt", kind: "custom", title: "Review consent" });
+		await emit("tool_execution_end", ctx, { toolCallId: "call-2", toolName: "edit", isError: false });
+		await emit("ui_prompt_start", ctx, { reason: "ui_prompt", kind: "confirm", title: "Again?" });
+		expect(appended).toStrictEqual([
+			["reply-thread.pause", { toolCallId: "call-2", toolName: "edit", kind: "custom", title: "Review consent" }],
+			["reply-thread.pause", { toolCallId: "call-1", toolName: "bash", kind: "confirm", title: "Again?", program: "ls" }],
+		]);
+	});
+
+	it("ignores a dialog of an ask tool, a dialog with no tool running and one after its tool ended", async () => {
+		const { emit, appended } = load();
+		const { ctx } = fakeCtx(branch, "tui");
+		await emit("ui_prompt_start", ctx, { reason: "ui_prompt", kind: "confirm", title: "Triage open asks?" });
+		await emit("tool_execution_start", ctx, start("call-q", "ask_user_question", { questions: [] }));
+		await emit("tool_execution_start", ctx, start("call-c", "ask_user_choice", { question: "x" }));
+		await emit("ui_prompt_start", ctx, { reason: "ui_prompt", kind: "custom" });
+		await emit("tool_execution_start", ctx, start("call-b", "bash", { command: "make clean" }));
+		await emit("tool_execution_end", ctx, { toolCallId: "call-b", toolName: "bash", isError: false });
+		await emit("ui_prompt_start", ctx, { reason: "ui_prompt", kind: "confirm", title: "Later" });
+		expect(appended).toEqual([]);
+	});
+
+	it("leaves out the program when the bash command is not a string or is blank", async () => {
+		const { emit, appended } = load();
+		const { ctx } = fakeCtx(branch, "tui");
+		await emit("tool_execution_start", ctx, start("call-b", "bash", { command: 42 }));
+		await emit("ui_prompt_start", ctx, { reason: "ui_prompt", kind: "confirm", title: "Run?" });
+		await emit("tool_execution_end", ctx, { toolCallId: "call-b", toolName: "bash", isError: false });
+		await emit("tool_execution_start", ctx, start("call-c", "bash", { command: "   " }));
+		await emit("ui_prompt_start", ctx, { reason: "ui_prompt", kind: "confirm", title: "Run?" });
+		expect(appended).toStrictEqual([
+			["reply-thread.pause", { toolCallId: "call-b", toolName: "bash", kind: "confirm", title: "Run?" }],
+			["reply-thread.pause", { toolCallId: "call-c", toolName: "bash", kind: "confirm", title: "Run?" }],
+		]);
+	});
+
+	it("skips leading NAME=value assignments: the program is the command, never a variable's value", async () => {
+		const { emit, appended } = load();
+		const { ctx } = fakeCtx(branch, "tui");
+		await emit("tool_execution_start", ctx, start("call-b", "bash", { command: "FOO=bar BAZ='q' make build" }));
+		await emit("ui_prompt_start", ctx, { reason: "ui_prompt", kind: "confirm", title: "Run?" });
+		await emit("tool_execution_end", ctx, { toolCallId: "call-b", toolName: "bash", isError: false });
+		await emit("tool_execution_start", ctx, start("call-c", "bash", { command: "FOO=bar" }));
+		await emit("ui_prompt_start", ctx, { reason: "ui_prompt", kind: "confirm", title: "Run?" });
+		expect(appended).toStrictEqual([
+			["reply-thread.pause", { toolCallId: "call-b", toolName: "bash", kind: "confirm", title: "Run?", program: "make" }],
+			["reply-thread.pause", { toolCallId: "call-c", toolName: "bash", kind: "confirm", title: "Run?" }],
+		]);
+	});
+
+	it("closes the recorded dialog with the tool's outcome in the reply that ends the turn", async () => {
+		const { emit } = load();
+		branch.push(user("pusheá"), toolCalls([{ id: "call-b", name: "bash", arguments: { command: "git push" } }]));
+		const { ctx } = fakeCtx(branch, "tui");
+		await emit("tool_execution_start", ctx, start("call-b", "bash", { command: "git push" }));
+		await emit("ui_prompt_start", ctx, { reason: "ui_prompt", kind: "confirm", title: "Allow git push?" });
+		await emit("tool_execution_end", ctx, { toolCallId: "call-b", toolName: "bash", isError: false });
+		branch.push(toolResultOf("call-b", "bash", "Everything up-to-date"), assistant("Pusheado.", { id: "f1f1f1f1" }));
+		expect(buildThreads(branch).at(-1)?.replies[0].pauses).toEqual([{ text: "Allow git push? [bash: git]", answer: "ran" }]);
 	});
 });

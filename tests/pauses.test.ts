@@ -3,7 +3,7 @@ import { indexRows } from "../src/format.ts";
 import { findReply } from "../src/lookup.ts";
 import { buildAsks, openIds, questionIds } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
-import { askEntry, assistant, resetIds, toolCalls, toolResultOf, user, wake } from "./helpers.ts";
+import { askEntry, assistant, customEntry, resetIds, toolCalls, toolResultOf, user, wake } from "./helpers.ts";
 
 beforeEach(() => resetIds());
 
@@ -182,5 +182,110 @@ describe("pauses: closed from the start", () => {
 		const open = openIds(buildAsks(entries, threads).pending);
 		expect(indexRows(threads, open).map((row) => row.text)[1]).toBe("P1.R1  ccccccc1  prompt  ✓");
 		expect(indexRows(threads).map((row) => row.text)[1]).toBe("P1.R1  ccccccc1  prompt  ✓");
+	});
+});
+
+const pauseEntry = (data: unknown) => customEntry("reply-thread.pause", data);
+
+describe("pauses: other dialogs while a tool runs (reply-thread.pause)", () => {
+	it("closes a dialog with ran when its tool succeeded, after the ask-tool pauses in branch order", () => {
+		const [thread] = buildThreads([
+			user("arrancá"),
+			toolCalls([{ id: "call-c", name: "ask_user_choice", arguments: CHOICE }]),
+			toolResultOf("call-c", "ask_user_choice", CHOICE_TEXT, { details: CHOICE_DETAILS }),
+			toolCalls([{ id: "call-b", name: "bash", arguments: { command: "git push origin main" } }]),
+			pauseEntry({ toolCallId: "call-b", toolName: "bash", kind: "confirm", title: "  Allow git push?  ", program: "git" }),
+			toolResultOf("call-b", "bash", "Everything up-to-date"),
+			assistant("Listo. ¿Algo más?", { id: "ddddddd1" }),
+		]);
+		const [reply] = thread.replies;
+		expect(reply.ordinal).toBe("P1.R1");
+		expect(reply.openAsks).toEqual(["Listo. ¿Algo más?"]);
+		expect(reply.pauses).toEqual([
+			{ text: "¿Dónde versiono la config?", answer: "Versioned in compose (recommended)" },
+			{ text: "Allow git push? [bash: git]", answer: "ran" },
+		]);
+		expect(questionIds(reply).map((one) => one.ordinal)).toEqual(["P1.R1.Q1", "P1.R1.Q2", "P1.R1.Q3"]);
+	});
+
+	it("closes a dialog with stopped and the first non-empty line of a failed result; no title gives <kind> dialog", () => {
+		const [thread] = buildThreads([
+			user("x"),
+			toolCalls([{ id: "call-e", name: "rdd_review", arguments: {} }]),
+			pauseEntry({ toolCallId: "call-e", toolName: "rdd_review", kind: "custom", title: "   " }),
+			toolResultOf("call-e", "rdd_review", "\n  Blocked by the user.  \nmore", { isError: true }),
+			assistant("Ok, no reviso."),
+		]);
+		expect(thread.replies[0].pauses).toEqual([{ text: "custom dialog [rdd_review]", answer: "stopped: Blocked by the user." }]);
+	});
+
+	it("keeps several dialogs of one tool, in order", () => {
+		const [thread] = buildThreads([
+			user("x"),
+			toolCalls([{ id: "call-b", name: "bash", arguments: { command: "make deploy" } }]),
+			pauseEntry({ toolCallId: "call-b", toolName: "bash", kind: "confirm", title: "First?", program: "make" }),
+			pauseEntry({ toolCallId: "call-b", toolName: "bash", kind: "select", title: "Second?", program: "make" }),
+			toolResultOf("call-b", "bash", "done"),
+			assistant("Desplegado."),
+		]);
+		expect(thread.replies[0].pauses).toEqual([
+			{ text: "First? [bash: make]", answer: "ran" },
+			{ text: "Second? [bash: make]", answer: "ran" },
+		]);
+	});
+
+	it("ignores an entry with an invalid shape", () => {
+		const [thread] = buildThreads([
+			user("x"),
+			toolCalls([{ id: "call-b", name: "bash", arguments: { command: "ls" } }]),
+			pauseEntry({ toolName: "bash", kind: "confirm", title: "No id" }),
+			pauseEntry({ toolCallId: "call-b", kind: "confirm", title: "No tool" }),
+			pauseEntry({ toolCallId: "call-b", toolName: "bash", title: "No kind" }),
+			pauseEntry({ toolCallId: "call-b", toolName: "bash", kind: "confirm", title: 7 }),
+			pauseEntry({ toolCallId: "call-b", toolName: "bash", kind: "confirm", program: ["ls"] }),
+			pauseEntry("call-b"),
+			pauseEntry(null),
+			toolResultOf("call-b", "bash", "README.md"),
+			assistant("Listo."),
+		]);
+		expect(thread.replies[0].pauses).toEqual([]);
+	});
+
+	it("drops a dialog no reply followed when a new prompt starts", () => {
+		const threads = buildThreads([
+			user("uno"),
+			toolCalls([{ id: "call-b", name: "bash", arguments: { command: "ls" } }]),
+			pauseEntry({ toolCallId: "call-b", toolName: "bash", kind: "confirm", title: "Run?", program: "ls" }),
+			toolResultOf("call-b", "bash", "README.md"),
+			user("dos"),
+			assistant("Ok."),
+			toolCalls([{ id: "call-d", name: "bash", arguments: { command: "ls" } }]),
+			pauseEntry({ toolCallId: "call-d", toolName: "bash", kind: "confirm", title: "Open?", program: "ls" }),
+			user("tres"),
+			toolResultOf("call-d", "bash", "README.md"),
+			assistant("Ok."),
+		]);
+		expect(threads.map((thread) => thread.replies.map((reply) => reply.pauses))).toEqual([[], [[]], [[]]]);
+	});
+
+	it("leaves a branch without pause entries as before: reply IDs and asks", () => {
+		const threads = buildThreads([
+			user("uno"),
+			assistant("Encontré dos. ¿Cuál preferís?", { id: "eeeeeee1" }),
+			toolCalls([{ id: "call-b", name: "bash", arguments: { command: "ls" } }]),
+			toolResultOf("call-b", "bash", "README.md", { isError: true }),
+			assistant("Listo.", { id: "eeeeeee2" }),
+			user("dos"),
+			assistant("¿Pusheo?", { id: "eeeeeee3" }),
+		]);
+		expect(
+			threads.map((thread) => thread.replies.map((reply) => [reply.ordinal, reply.entryId, reply.openAsks, reply.pauses])),
+		).toEqual([
+			[
+				["P1.R1", "eeeeeee1", ["Encontré dos. ¿Cuál preferís?"], []],
+				["P1.R2", "eeeeeee2", [], []],
+			],
+			[["P2.R1", "eeeeeee3", ["¿Pusheo?"], []]],
+		]);
 	});
 });

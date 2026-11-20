@@ -1,6 +1,7 @@
 /**
  * Pauses: dialogs that stopped a turn to ask the user something (`ask_user_question`, `ask_user_choice`).
  * The session keeps the tool call and its result, so each question comes back with the answer chosen.
+ * Other dialogs shown while a tool runs are `reply-thread.pause` entries, closed with the tool's outcome.
  */
 
 /** One question of a dialog and the answer the user gave in it. */
@@ -11,6 +12,46 @@ export interface Pause {
 
 /** Tools whose calls are dialogs with the user, read from the session. */
 export const ASK_TOOLS: ReadonlySet<string> = new Set(["ask_user_question", "ask_user_choice"]);
+
+/** Custom entry type of a dialog shown while a tool ran (a command guard's confirm, a review consent). */
+export const PAUSE_ENTRY = "reply-thread.pause";
+
+/**
+ * A dialog shown while a tool other than the ask tools ran. Pi does not tell extensions what the user
+ * pressed, so it keeps only its title, the tool and, for bash, the program name (never its arguments).
+ */
+export interface DialogPause {
+	toolCallId: string;
+	toolName: string;
+	kind: string;
+	title?: string;
+	program?: string;
+}
+
+/** The data of a `reply-thread.pause` entry, or undefined when it does not have that shape. */
+export function dialogOf(data: unknown): DialogPause | undefined {
+	const input = record(data);
+	if (!input) return undefined;
+	const { toolCallId, toolName, kind, title, program } = input;
+	const text = (value: unknown) => typeof value === "string" && value.length > 0;
+	if (!text(toolCallId) || !text(toolName) || !text(kind)) return undefined;
+	if (title !== undefined && typeof title !== "string") return undefined;
+	if (program !== undefined && typeof program !== "string") return undefined;
+	return { toolCallId, toolName, kind, title, program } as DialogPause;
+}
+
+/**
+ * A dialog as a pause: its title (else `<kind> dialog`) with the tool and program, answered `ran` when
+ * the tool's result is not an error, else `stopped: <first line of the result>`.
+ */
+export function dialogPause(dialog: DialogPause, result: PauseResult): Pause {
+	const title = dialog.title?.trim() || `${dialog.kind} dialog`;
+	const program = dialog.program?.trim();
+	const tool = program ? `${dialog.toolName}: ${program}` : dialog.toolName;
+	const line = firstLine(result.text);
+	const answer = !result.isError ? "ran" : line ? `stopped: ${line}` : "stopped";
+	return { text: `${title} [${tool}]`, answer };
+}
 
 /** The parts of a tool result a pause reads. */
 export interface PauseResult {

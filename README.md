@@ -428,6 +428,16 @@ the viewer lists them under `✓ Answered` with `→ chose: <your answer>`, and 
 A dialog whose turn ended without a reply (you interrupted it) is not shown, nor a call that failed
 validation.
 
+Other dialogs count too: a confirm or select shown while a tool runs (a command guard's
+confirmation, a host-resolved review consent) is recorded as a `reply-thread.pause` entry with only
+its title, the tool and, for `bash`, the program name (the command's first word, never its
+arguments), for example `Allow this command? [bash: git]`; a dialog without a title shows as
+`confirm dialog [<tool>]`. Pi does not tell extensions which button was pressed, so the ask closes
+with the tool's outcome instead: `ran` when the tool finished without an error, else
+`stopped: <first line of the tool's result>`. It joins the same reply as the other dialogs, in the
+order they happened. A dialog shown outside any tool (this package's own triage confirm) is not
+recorded.
+
 ### Widget
 
 A widget above the editor summarizes the latest prompt while it has two or more replies, with `⚠`

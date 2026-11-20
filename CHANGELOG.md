@@ -5,6 +5,9 @@
 - Dialogs that pause a turn (`ask_user_question`, `ask_user_choice`) show up as closed asks of the
   reply that ends the turn, numbered after its own asks, with the answer you chose: `↳ chose: …` in
   Answered, `→ chose: …` in the viewer. Reply and existing question IDs do not change.
+- Other dialogs shown while a tool runs (a command guard's confirm, a review consent) are recorded as
+  `reply-thread.pause` entries (title, tool and, for `bash`, only the program name) and show up the
+  same way, closed with the tool's outcome: `ran`, or `stopped: …` when the tool failed.
 
 ## 0.3.0 (2026-11-17)
 

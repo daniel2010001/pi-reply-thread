@@ -3,6 +3,7 @@ import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";
 import type { AskMode } from "../src/asks.ts";
 import { answerFormat, FORMAT_ENTRY, formatIndex, formatPending, formatReplyPlain, widgetLines } from "../src/format.ts";
 import { findReply, noMatchMessage } from "../src/lookup.ts";
+import { ASK_TOOLS, type DialogPause, PAUSE_ENTRY } from "../src/pauses.ts";
 import { ASK_ENTRY, type AskAction, buildAsks, buildPending, similarGroups, TRIAGE_ENTRY } from "../src/pending.ts";
 import { buildThreads } from "../src/threads.ts";
 import { parseTriage, triageRequest } from "../src/triage.ts";
@@ -102,6 +103,19 @@ function readerSpeak(pi: ExtensionAPI): Speak | undefined {
 	}
 	if (!ready) return undefined;
 	return (id, text) => pi.events.emit(READER_READ, { v: 1, id, text });
+}
+
+/**
+ * The program a bash call runs: the first word of its command after any leading `NAME=value`
+ * assignments, never its arguments nor a variable's value.
+ */
+function programOf(args: unknown): string | undefined {
+	const command = typeof args === "object" && args !== null ? (args as { command?: unknown }).command : undefined;
+	if (typeof command !== "string") return undefined;
+	return command
+		.trim()
+		.split(/\s+/)
+		.find((word) => word && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
 }
 
 function isVersion1(data: unknown): boolean {
@@ -280,8 +294,29 @@ export default function replyThread(pi: ExtensionAPI): void {
 	pi.on("agent_start", recordTurnPrompt);
 	pi.on("turn_start", recordTurnPrompt);
 
+	// Tools running now, oldest first: a dialog shown meanwhile belongs to the newest one.
+	const running = new Map<string, { toolName: string; args: unknown }>();
+	pi.on("tool_execution_start", (event) => {
+		running.set(event.toolCallId, { toolName: event.toolName, args: event.args });
+	});
+	pi.on("tool_execution_end", (event) => {
+		running.delete(event.toolCallId);
+	});
+	// The ask tools are read from the session; a dialog outside any tool (the triage confirm) is no pause.
+	pi.on("ui_prompt_start", (event) => {
+		const tool = [...running].reverse().find(([, one]) => !ASK_TOOLS.has(one.toolName));
+		if (!tool) return;
+		const [toolCallId, { toolName, args }] = tool;
+		const dialog: DialogPause = { toolCallId, toolName, kind: event.kind };
+		if (event.title !== undefined) dialog.title = event.title;
+		const program = toolName === "bash" ? programOf(args) : undefined;
+		if (program) dialog.program = program;
+		pi.appendEntry(PAUSE_ENTRY, dialog);
+	});
+
 	pi.on("session_shutdown", () => {
 		clearTimeout(pending);
 		pending = undefined;
+		running.clear();
 	});
 }
