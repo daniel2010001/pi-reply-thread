@@ -289,3 +289,23 @@ describe("pauses: other dialogs while a tool runs (reply-thread.pause)", () => {
 		]);
 	});
 });
+
+describe("pauses: a dialog title with several lines", () => {
+	it("keeps only the title's first line: a guard puts the whole command on the next one", async () => {
+		const { customEntry } = await import("./helpers.ts");
+		const [thread] = buildThreads([
+			user("borrá la carpeta"),
+			toolCalls([{ id: "call-b", name: "bash", arguments: { command: "rm -rf /tmp/x" } }]),
+			customEntry("reply-thread.pause", {
+				toolCallId: "call-b",
+				toolName: "bash",
+				kind: "select",
+				title: "Allow recognized data-loss command?\nrm -rf /tmp/x",
+				program: "rm",
+			}),
+			toolResultOf("call-b", "bash", ""),
+			assistant("Borrada."),
+		]);
+		expect(thread.replies[0].pauses).toEqual([{ text: "Allow recognized data-loss command? [bash: rm]", answer: "ran" }]);
+	});
+});

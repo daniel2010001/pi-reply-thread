@@ -41,11 +41,12 @@ export function dialogOf(data: unknown): DialogPause | undefined {
 }
 
 /**
- * A dialog as a pause: its title (else `<kind> dialog`) with the tool and program, answered `ran` when
+ * A dialog as a pause: the first line of its title (else `<kind> dialog`) with the tool and program, answered `ran` when
  * the tool's result is not an error, else `stopped: <first line of the result>`.
  */
 export function dialogPause(dialog: DialogPause, result: PauseResult): Pause {
-	const title = dialog.title?.trim() || `${dialog.kind} dialog`;
+	// Only the first line: a command guard puts the whole command under its question.
+	const title = firstLine(dialog.title ?? "") || `${dialog.kind} dialog`;
 	const program = dialog.program?.trim();
 	const tool = program ? `${dialog.toolName}: ${program}` : dialog.toolName;
 	const line = firstLine(result.text);
