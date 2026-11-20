@@ -1,6 +1,14 @@
 import type { KeybindingsManager, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
-import { type Component, Markdown, matchesKey, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import {
+	type Component,
+	Markdown,
+	matchesKey,
+	type TUI,
+	truncateToWidth,
+	visibleWidth,
+	wrapTextWithAnsi,
+} from "@earendil-works/pi-tui";
 import {
 	type AnswerFormat,
 	answerText,
@@ -24,6 +32,7 @@ import {
 	questionIds,
 	similarGroups,
 } from "../src/pending.ts";
+import type { Pause } from "../src/pauses.ts";
 import type { Reply, Thread, Trigger, TriggerKind } from "../src/threads.ts";
 
 /** Pi cuts an overlay taller than its `maxHeight`, so the view sizes itself to the same cap. */
@@ -88,6 +97,20 @@ type PendingRow =
 /** Prompt headers and proposal lines only label the rows under or above them. */
 function selectable(row: PendingRow): boolean {
 	return row.kind !== "prompt" && row.kind !== "proposal";
+}
+
+/** The pause card: a closed row of a dialog and the dialog's question, options and answer. */
+interface PauseCard {
+	row: ClosedAsk;
+	pause: Pause;
+}
+
+/** The pause behind a closed row of a dialog: its asks come after the reply's text asks (`questionIds`). */
+function pauseOf(row: ClosedAsk): Pause | undefined {
+	if (row.closedBy.kind !== "pause") return undefined;
+	const { id, reply } = row.ask;
+	const number = Number(id.slice(id.lastIndexOf(".") + 1));
+	return reply.pauses[number - 1 - reply.openAsks.length];
 }
 
 /** One line of the Answered tab: a prompt header, a closed ask, or the line under it that tells how it closed. */
@@ -237,6 +260,8 @@ export class RepliesView implements Component {
 	/** Reads a text aloud through pi-reply-reader; undefined when it is not loaded, so `s` and its hint stay away. */
 	private readonly speak?: Speak;
 	private helpTop = 0;
+	/** The pause card Enter or `o` opened from Answered; the reply viewer opens over it and Esc there comes back. */
+	private card: PauseCard | undefined;
 
 	constructor(
 		tui: TUI,
@@ -334,6 +359,8 @@ export class RepliesView implements Component {
 			else if (matchesKey(data, "end")) this.scroll = Number.MAX_SAFE_INTEGER;
 			else if (this.speak && matchesKey(data, "s")) this.speak(this.reply.ordinal, this.reply.text);
 			else return;
+		} else if (this.card) {
+			if (!this.cardInput(data)) return;
 		} else if (this.help) {
 			if (!this.helpInput(data)) return;
 		} else if (this.central && matchesKey(data, "?")) {
@@ -661,7 +688,10 @@ export class RepliesView implements Component {
 		else if (kb.matches(data, "tui.select.pageUp")) move(-page);
 		else if (kb.matches(data, "tui.select.pageDown")) move(page);
 		else if ((kb.matches(data, "tui.select.confirm") || matchesKey(data, "o")) && row?.kind === "ask") {
-			this.open(row.row.ask.reply, row.row.ask.thread);
+			// A dialog's row opens its card; the reply is one `o` away from there.
+			const pause = pauseOf(row.row);
+			if (pause) this.card = { row: row.row, pause };
+			else this.open(row.row.ask.reply, row.row.ask.thread);
 		} else if (this.speak && matchesKey(data, "s") && row?.kind === "ask") {
 			this.speak(row.row.ask.ordinal, row.row.ask.text);
 		} else if (matchesKey(data, "r") && row?.kind === "ask" && row.row.closedBy.kind !== "pause") {
@@ -670,6 +700,67 @@ export class RepliesView implements Component {
 		} else if (matchesKey(data, "backspace")) this.undo();
 		else return false;
 		return true;
+	}
+
+	// ── Pause card ───────────────────────────────────────────────────────────
+
+	/** Keys of the pause card: `o` opens the reply that ended the turn, Esc goes back to Answered; nothing else. */
+	private cardInput(data: string): boolean {
+		const { row } = this.card as PauseCard;
+		if (this.keybindings.matches(data, "tui.select.cancel")) this.card = undefined;
+		else if (matchesKey(data, "o")) this.open(row.ask.reply, row.ask.thread);
+		else return false;
+		return true;
+	}
+
+	/**
+	 * The question, its options with the chosen ones `✓`, the answer, the tool and the reply that ended the turn.
+	 * When it does not fit the cap, the options go first down to `… N more`, then the question down to 2 lines.
+	 */
+	private renderCard(width: number): string[] {
+		const theme = this.theme;
+		const { row, pause } = this.card as PauseCard;
+		const content = width - 4;
+		const body = this.available() - 2;
+		const question = wrapTextWithAnsi(pause.text, Math.max(1, content));
+		const options = pause.options ?? [];
+		const parts = pause.answer.split(", ");
+		const chosen = (label: string) => label === pause.answer || parts.includes(label);
+		// The empty line, `Chose:`, `Tool:` and `In …`, and the `Options` title when there are options.
+		const fixed = 4 + (options.length ? 1 : 0);
+		let shown = options.length;
+		if (question.length + fixed + options.length > body) {
+			const room = Math.max(1, body - fixed - question.length);
+			if (room < options.length) shown = room - 1;
+		}
+		const more = options.length - shown;
+		const keep = Math.min(question.length, Math.max(2, body - fixed - shown - (more ? 1 : 0)));
+		const asked = question.slice(0, keep);
+		if (keep < question.length) asked[keep - 1] = truncateToWidth(`${asked[keep - 1]}…`, content, "…");
+		const program = pause.program ? ` · ${pause.program}` : "";
+		const lines = [
+			...asked.map((line) => theme.fg("text", line)),
+			"",
+			...(options.length ? [theme.fg("muted", theme.bold("Options"))] : []),
+			...options
+				.slice(0, shown)
+				.map(
+					(label) => `  ${chosen(label) ? theme.fg("success", "✓") : theme.fg("muted", "•")} ${theme.fg("text", label)}`,
+				),
+			...(more ? [theme.fg("muted", `  … ${more} more`)] : []),
+			theme.fg("accent", `Chose: ${pause.answer.replace(/\s*\n\s*/g, " ")}`),
+			theme.fg("muted", `Tool: ${pause.tool}${program}`),
+			theme.fg("dim", `In ${row.ask.reply.ordinal}, the reply that ended the turn.`),
+		];
+		const hints: Hint[] = [
+			["o", "open reply"],
+			["esc", "back"],
+		];
+		return [
+			this.top(`${row.ask.ordinal} · pause`, "", width),
+			...lines.slice(0, Math.max(1, body)).map((line) => this.line(line, width)),
+			this.bottom(hints, "", width),
+		];
 	}
 
 	// ── Frame ────────────────────────────────────────────────────────────────
@@ -1080,6 +1171,7 @@ export class RepliesView implements Component {
 			...this.readHelp("read the selected reply aloud"),
 			"Answered",
 			["enter, o", "open the reply"],
+			{ note: "enter/o on a pause opens its card", indent: true },
 			["r", "reopen the selected ask"],
 			...this.readHelp("read the selected ask aloud"),
 			["⌫", "undo the last action"],
@@ -1232,6 +1324,7 @@ export class RepliesView implements Component {
 
 	render(width: number): string[] {
 		if (this.reply && this.body) return this.renderViewer(width);
+		if (this.card) return this.renderCard(width);
 		if (this.help) return this.renderHelp(width);
 		if (this.tab === "pending") return this.renderPending(width);
 		return this.tab === "answered" ? this.renderAnswered(width) : this.renderList(width);

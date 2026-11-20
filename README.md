@@ -395,7 +395,8 @@ A new triage replaces the proposals of the previous one; a proposal that no long
 The **Answered** tab lists the closed asks, grouped under the prompt of their reply, newest prompt
 first. Under each ask, `↳` names the prompt that answered it and the answer it gave, or `✕ dismissed`
 says you dismissed it. A closed chain shows once, on its newest ask, with `↺ <older IDs>`. `↑`/`↓`
-move and `Enter` or `o` opens the reply.
+move and `Enter` or `o` opens the reply (on a dialog's ask, its card: see
+[Dialogs (pauses)](#dialogs-pauses)).
 
 `r` reopens the selected ask, answered or dismissed, and every ask of a closed chain: it writes a
 `reopen` entry for each, and the ask goes back to Pending, with `⚠` on its reply again. `Backspace`
@@ -438,6 +439,26 @@ with the tool's outcome instead: `ran` when the tool finished without an error, 
 `stopped: <first line of the tool's result>`. It joins the same reply as the other dialogs, in the
 order they happened. A dialog shown outside any tool (this package's own triage confirm) is not
 recorded.
+
+In the Answered tab, `Enter` or `o` on a dialog's ask opens its card instead of the reply: the
+question, the options the dialog offered with the ones you chose marked `✓` (none for a typed
+answer; no `Options` block for a dialog without options), `Chose: <your answer>`, the tool
+(`Tool: bash · rm` for a command guard), and the reply that ended the turn. On a short screen the
+options are cut to `… N more` first, then the question down to two lines. In the card, `o` opens
+that reply (`Esc` there comes back to the card) and `Esc` goes back to Answered on the same row.
+
+```
+╭─ P4.R1.Q1 · pause ────────────────────────────────────╮
+│ Delete the old branch?                                │
+│                                                       │
+│ Options                                               │
+│   ✓ Yes, go ahead                                     │
+│   • No                                                │
+│ Chose: Yes, go ahead                                  │
+│ Tool: ask_user_question                               │
+│ In P4.R1, the reply that ended the turn.              │
+╰─ o open reply · esc back ─────────────────────────────╯
+```
 
 ### Widget
 

@@ -1792,3 +1792,253 @@ describe("pauses in the central", () => {
 		expect(rows).toContainEqual(expect.stringMatching(/^│ {3}• ¿Dónde versiono la config\?  → chose: En compose +│$/));
 	});
 });
+
+describe("pause card", () => {
+	const QUESTIONS = {
+		questions: [
+			{ header: "Branch", question: "¿Borro la rama vieja?", options: [{ label: "Sí, adelante" }, { label: "No" }] },
+			{
+				header: "Docs",
+				question: "¿Qué docs actualizo?",
+				multiSelect: true,
+				options: [{ label: "README" }, { label: "CHANGELOG" }, { label: "AGENTS" }],
+			},
+			{ header: "Voice", question: "¿Qué voz uso?", options: [{ label: "Piper" }, { label: "Otra" }] },
+		],
+	};
+	const DETAILS = {
+		answers: [
+			{ questionIndex: 0, kind: "option", answer: "Sí, adelante" },
+			{ questionIndex: 1, kind: "multi", answer: null, selected: ["README", "CHANGELOG"] },
+			{ questionIndex: 2, kind: "custom", answer: "la de siempre" },
+		],
+	};
+	const paused = () => {
+		branch.push(
+			user("limpiá todo"),
+			toolCalls([{ id: "call-q", name: "ask_user_question", arguments: QUESTIONS }]),
+			toolResultOf("call-q", "ask_user_question", "1. ¿Borro la rama vieja? — Sí, adelante", { details: DETAILS }),
+			toolCalls([{ id: "call-b", name: "bash", arguments: { command: "rm -rf /tmp/x" } }]),
+			customEntry("reply-thread.pause", {
+				toolCallId: "call-b",
+				toolName: "bash",
+				kind: "select",
+				title: "Allow recognized data-loss command?\nrm -rf /tmp/x",
+				program: "rm",
+			}),
+			toolResultOf("call-b", "bash", ""),
+			assistant("Hecho.", { id: "ffffffff" }),
+		);
+	};
+	/** The Answered tab over the branch, `down` rows below the first closed ask. */
+	const answered = (down = 0, rows = 30) => {
+		const view = central(branch, { tab: "replies", rows });
+		view.key("\t");
+		for (let step = 0; step < down; step += 1) view.key("tui.select.down");
+		return view;
+	};
+	const W = 100;
+	const row = (content: string) => `│ ${content.padEnd(W - 4)} │`;
+	const top = (title: string) => `╭─ ${title} ${"─".repeat(W - 5 - title.length)}╮`;
+	const bottom = (hints: string) => `╰─ ${hints} ${"─".repeat(W - 5 - hints.length)}╯`;
+	const HINTS = bottom("o open reply · esc back");
+	const IN = row("In P4.R1, the reply that ended the turn.");
+
+	it("Enter on a single choice opens its card: question, options with the chosen one ✓, answer, tool, reply", () => {
+		paused();
+		const view = answered();
+		expect(view.text(W)[2]).toMatch(/^│ ›✓ P4\.R1\.Q1  ¿Borro la rama vieja\?/);
+		view.key("tui.select.confirm");
+		expect(view.text(W)).toEqual([
+			top("P4.R1.Q1 · pause"),
+			row("¿Borro la rama vieja?"),
+			row(""),
+			row("Options"),
+			row("  ✓ Sí, adelante"),
+			row("  • No"),
+			row("Chose: Sí, adelante"),
+			row("Tool: ask_user_question"),
+			IN,
+			HINTS,
+		]);
+	});
+
+	it("marks every selected option of a multi-select answer", () => {
+		paused();
+		const view = answered(1);
+		view.key("o");
+		expect(view.text(W).slice(0, 8)).toEqual([
+			top("P4.R1.Q2 · pause"),
+			row("¿Qué docs actualizo?"),
+			row(""),
+			row("Options"),
+			row("  ✓ README"),
+			row("  ✓ CHANGELOG"),
+			row("  • AGENTS"),
+			row("Chose: README, CHANGELOG"),
+		]);
+	});
+
+	it("marks no option for a typed answer", () => {
+		paused();
+		const view = answered(2);
+		view.key("tui.select.confirm");
+		expect(view.text(W).slice(3, 7)).toEqual([row("Options"), row("  • Piper"), row("  • Otra"), row("Chose: la de siempre")]);
+	});
+
+	it("leaves the Options block out for a dialog without options and names the tool with its program", () => {
+		paused();
+		const view = answered(3);
+		view.key("tui.select.confirm");
+		expect(view.text(W)).toEqual([
+			top("P4.R1.Q4 · pause"),
+			row("Allow recognized data-loss command? [bash: rm]"),
+			row(""),
+			row("Chose: ran"),
+			row("Tool: bash · rm"),
+			IN,
+			HINTS,
+		]);
+	});
+
+	it("colours the chosen mark success, the others muted, Options muted, Chose accent, Tool muted and the reply line dim", () => {
+		paused();
+		const view = answered();
+		view.key("tui.select.confirm");
+		const lines = view.lines(W);
+		expect(lines[3]).toContain(fg("muted"));
+		expect(lines[4]).toContain(`${fg("success")}✓`);
+		expect(lines[5]).toContain(`${fg("muted")}•`);
+		expect(lines[6]).toContain(`${fg("accent")}Chose: Sí, adelante`);
+		expect(lines[7]).toContain(`${fg("muted")}Tool: ask_user_question`);
+		expect(lines[8]).toContain(`${fg("dim")}In P4.R1`);
+	});
+
+	const many = (question: string) => {
+		branch.push(
+			user("elegí"),
+			toolCalls([
+				{
+					id: "call-c",
+					name: "ask_user_choice",
+					arguments: { question, options: Array.from({ length: 8 }, (_, index) => ({ label: `Opción ${index + 1}`, value: `${index}` })) },
+				},
+			]),
+			toolResultOf("call-c", "ask_user_choice", "User selected: 2. Opción 2 (value: 1)"),
+			assistant("Ok.", { id: "eeeeeeee" }),
+		);
+	};
+
+	it("cuts the options with … N more on a short screen and keeps the card under the cap", () => {
+		many("¿Cuál?");
+		const view = answered(0, 16);
+		view.key("tui.select.confirm");
+		expect(view.text(W)).toEqual([
+			top("P4.R1.Q1 · pause"),
+			row("¿Cuál?"),
+			row(""),
+			row("Options"),
+			row("  • Opción 1"),
+			row("  ✓ Opción 2"),
+			row("  • Opción 3"),
+			row("  … 5 more"),
+			row("Chose: Opción 2"),
+			row("Tool: ask_user_choice"),
+			IN,
+			HINTS,
+		]);
+		for (const rows of [8, 12, 14, 20, 30]) {
+			const cap = Math.min(rows - 4, Math.floor(rows * 0.9));
+			const small = answered(0, rows);
+			small.key("tui.select.confirm");
+			for (const width of [40, W]) {
+				const lines = small.text(width);
+				expect(lines.length).toBeLessThanOrEqual(cap);
+				expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
+				expect(lines[0]).toMatch(/^╭─ P4\.R1\.Q1 · pause/);
+				expect(lines.at(-1)).toMatch(/^╰─/);
+			}
+		}
+	});
+
+	it("wraps a long question and keeps at least 2 of its lines when the options are already cut", () => {
+		many("¿Cuál de todas estas opciones preferís usar para versionar la configuración del servidor de casa?");
+		const view = answered(0, 14);
+		view.key("tui.select.confirm");
+		const lines = view.text(40);
+		expect(lines).toEqual([
+			expect.stringMatching(/^╭─ P4\.R1\.Q1 · pause ─+╮$/),
+			`│ ${"¿Cuál de todas estas opciones".padEnd(36)} │`,
+			expect.stringMatching(/^│ preferís usar para versionar la.*… *│$/),
+			`│ ${"".padEnd(36)} │`,
+			`│ ${"Options".padEnd(36)} │`,
+			`│ ${"  … 8 more".padEnd(36)} │`,
+			`│ ${"Chose: Opción 2".padEnd(36)} │`,
+			`│ ${"Tool: ask_user_choice".padEnd(36)} │`,
+			"│ In P4.R1, the reply that ended the … │",
+			expect.stringMatching(/^╰─ o open reply · esc back ─+╯$/),
+		]);
+		const tall = answered(0, 30);
+		tall.key("tui.select.confirm");
+		expect(tall.text(40).slice(1, 5)).toEqual([
+			`│ ${"¿Cuál de todas estas opciones".padEnd(36)} │`,
+			`│ ${"preferís usar para versionar la".padEnd(36)} │`,
+			`│ ${"configuración del servidor de casa?".padEnd(36)} │`,
+			`│ ${"".padEnd(36)} │`,
+		]);
+	});
+
+	it("o opens the reply that ended the turn, Esc there returns to the card, Esc on the card to the same Answered row", () => {
+		paused();
+		const view = answered(1);
+		view.key("tui.select.confirm");
+		expect(view.text(W)[0]).toBe(top("P4.R1.Q2 · pause"));
+		view.key("o");
+		expect(view.text(W)[0]).toMatch(/^╭─ P4\.R1 .*ffffffff/);
+		view.key("tui.select.cancel");
+		expect(view.text(W)[0]).toBe(top("P4.R1.Q2 · pause"));
+		view.key("tui.select.cancel");
+		const rows = view.text(W);
+		expect(rows[0]).toMatch(/^╭─ Answered /);
+		expect(rows).toContainEqual(expect.stringMatching(/^│ ›✓ P4\.R1\.Q2  ¿Qué docs actualizo\?/));
+		expect(view.closed()).toBeUndefined();
+	});
+
+	it("does nothing on other keys in the card", () => {
+		paused();
+		const view = answered();
+		view.key("tui.select.confirm");
+		const card = view.text(W);
+		for (const key of ["r", "x", "\t", "?", "s", "tui.select.confirm", "tui.select.down", "\x7f"]) {
+			view.key(key);
+			expect(view.text(W)).toEqual(card);
+		}
+		expect(view.actions).toEqual([]);
+		expect(view.closed()).toBeUndefined();
+	});
+
+	it("keeps Enter and o on a row closed otherwise opening its reply", () => {
+		paused();
+		branch.push(askEntry({ action: "dismiss", ask: "a1b2c3d4.2" }));
+		const view = central(branch, { tab: "replies" });
+		view.key("\t");
+		const at = view.text(W).findIndex((line) => /P1\.R1\.Q2/.test(line));
+		const steps = view.text(W).slice(0, at).filter((line) => /✓ P\d/.test(line)).length;
+		for (let step = 0; step < steps; step += 1) view.key("tui.select.down");
+		for (const key of ["tui.select.confirm", "o"]) {
+			view.key(key);
+			expect(view.text(W)[0]).toMatch(/^╭─ P1\.R1 .*a1b2c3d4/);
+			view.key("tui.select.cancel");
+			expect(view.text(W)[0]).toMatch(/^╭─ Answered /);
+		}
+	});
+
+	it("lists enter/o on a pause in the ? card under the Answered keys", () => {
+		const view = central(branch, { rows: 60 });
+		view.key("?");
+		const rows = view.text(W);
+		const at = rows.findIndex((line) => /^│ {3}enter\/o on a pause opens its card +│$/.test(line));
+		expect(at).toBeGreaterThan(rows.findIndex((line) => /^│ Answered +│$/.test(line)));
+		expect(at).toBeLessThan(rows.findIndex((line) => /^│ Every tab +│$/.test(line)));
+	});
+});

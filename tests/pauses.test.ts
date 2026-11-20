@@ -54,9 +54,9 @@ describe("pauses: ask tools inside a turn", () => {
 		expect(first.pauses).toEqual([]);
 		expect(second.openAsks).toEqual(["Hecho. ¿Pusheo?", "¿Publico?"]);
 		expect(second.pauses).toEqual([
-			{ text: "¿Borro la rama vieja?", answer: "Sí, adelante" },
-			{ text: "¿Qué docs actualizo?", answer: "README, CHANGELOG" },
-			{ text: "¿Qué voz uso?", answer: "la de siempre" },
+			{ text: "¿Borro la rama vieja?", answer: "Sí, adelante", tool: "ask_user_question", options: ["Sí, adelante", "No"] },
+			{ text: "¿Qué docs actualizo?", answer: "README, CHANGELOG", tool: "ask_user_question", options: ["README", "CHANGELOG"] },
+			{ text: "¿Qué voz uso?", answer: "la de siempre", tool: "ask_user_question", options: ["Piper", "Otra"] },
 		]);
 		expect(questionIds(second)).toEqual([
 			{ ordinal: "P1.R2.Q1", id: "aaaaaaa2.1", text: "Hecho. ¿Pusheo?" },
@@ -75,7 +75,12 @@ describe("pauses: ask tools inside a turn", () => {
 			assistant("Listo."),
 		]);
 		expect(thread.replies[0].pauses).toEqual([
-			{ text: "¿Dónde versiono la config?", answer: "Versioned in compose (recommended)" },
+			{
+				text: "¿Dónde versiono la config?",
+				answer: "Versioned in compose (recommended)",
+				tool: "ask_user_choice",
+				options: ["Versioned in compose (recommended)", "Aparte"],
+			},
 		]);
 	});
 
@@ -105,7 +110,14 @@ describe("pauses: ask tools inside a turn", () => {
 			toolResultOf("call-c", "ask_user_choice", "User cancelled the selection.\nNothing chosen."),
 			assistant("Ok, lo dejo."),
 		]);
-		expect(thread.replies[0].pauses).toEqual([{ text: "¿Dónde versiono la config?", answer: "User cancelled the selection." }]);
+		expect(thread.replies[0].pauses).toEqual([
+			{
+				text: "¿Dónde versiono la config?",
+				answer: "User cancelled the selection.",
+				tool: "ask_user_choice",
+				options: ["Versioned in compose (recommended)", "Aparte"],
+			},
+		]);
 	});
 
 	it("skips a failed call, a pause no final reply follows in its thread, and other tools", () => {
@@ -202,8 +214,13 @@ describe("pauses: other dialogs while a tool runs (reply-thread.pause)", () => {
 		expect(reply.ordinal).toBe("P1.R1");
 		expect(reply.openAsks).toEqual(["Listo. ¿Algo más?"]);
 		expect(reply.pauses).toEqual([
-			{ text: "¿Dónde versiono la config?", answer: "Versioned in compose (recommended)" },
-			{ text: "Allow git push? [bash: git]", answer: "ran" },
+			{
+				text: "¿Dónde versiono la config?",
+				answer: "Versioned in compose (recommended)",
+				tool: "ask_user_choice",
+				options: ["Versioned in compose (recommended)", "Aparte"],
+			},
+			{ text: "Allow git push? [bash: git]", answer: "ran", tool: "bash", program: "git" },
 		]);
 		expect(questionIds(reply).map((one) => one.ordinal)).toEqual(["P1.R1.Q1", "P1.R1.Q2", "P1.R1.Q3"]);
 	});
@@ -216,7 +233,10 @@ describe("pauses: other dialogs while a tool runs (reply-thread.pause)", () => {
 			toolResultOf("call-e", "rdd_review", "\n  Blocked by the user.  \nmore", { isError: true }),
 			assistant("Ok, no reviso."),
 		]);
-		expect(thread.replies[0].pauses).toEqual([{ text: "custom dialog [rdd_review]", answer: "stopped: Blocked by the user." }]);
+		expect(thread.replies[0].pauses).toEqual([
+			{ text: "custom dialog [rdd_review]", answer: "stopped: Blocked by the user.", tool: "rdd_review" },
+		]);
+		expect(Object.keys(thread.replies[0].pauses[0])).toEqual(["text", "answer", "tool"]);
 	});
 
 	it("keeps several dialogs of one tool, in order", () => {
@@ -229,8 +249,8 @@ describe("pauses: other dialogs while a tool runs (reply-thread.pause)", () => {
 			assistant("Desplegado."),
 		]);
 		expect(thread.replies[0].pauses).toEqual([
-			{ text: "First? [bash: make]", answer: "ran" },
-			{ text: "Second? [bash: make]", answer: "ran" },
+			{ text: "First? [bash: make]", answer: "ran", tool: "bash", program: "make" },
+			{ text: "Second? [bash: make]", answer: "ran", tool: "bash", program: "make" },
 		]);
 	});
 
@@ -290,6 +310,42 @@ describe("pauses: other dialogs while a tool runs (reply-thread.pause)", () => {
 	});
 });
 
+describe("pauses: tool and options for the pause card", () => {
+	it("keeps no options key when an ask_user_question question or an ask_user_choice call has none", () => {
+		const [thread] = buildThreads([
+			user("x"),
+			toolCalls([
+				{ id: "call-q", name: "ask_user_question", arguments: { questions: [{ header: "Name", question: "¿Cómo se llama?" }] } },
+				{ id: "call-c", name: "ask_user_choice", arguments: { question: "¿Cuál?", options: [] } },
+			]),
+			toolResultOf("call-q", "ask_user_question", "1. ¿Cómo se llama? — (custom) reply-thread"),
+			toolResultOf("call-c", "ask_user_choice", "User selected: 1. Uno (value: 1)"),
+			assistant("Listo."),
+		]);
+		const [question, choice] = thread.replies[0].pauses;
+		expect(question).toEqual({ text: "¿Cómo se llama?", answer: "(custom) reply-thread", tool: "ask_user_question" });
+		expect(choice).toEqual({ text: "¿Cuál?", answer: "Uno", tool: "ask_user_choice" });
+		expect("options" in question).toBe(false);
+		expect("options" in choice).toBe(false);
+	});
+
+	it("keeps option labels in order, skipping items without a text label", () => {
+		const [thread] = buildThreads([
+			user("x"),
+			toolCalls([
+				{
+					id: "call-c",
+					name: "ask_user_choice",
+					arguments: { question: "¿Cuál?", options: [{ label: "B", value: "b" }, { value: "x" }, { label: "A", value: "a" }] },
+				},
+			]),
+			toolResultOf("call-c", "ask_user_choice", "User selected: 2. A (value: a)"),
+			assistant("Listo."),
+		]);
+		expect(thread.replies[0].pauses[0].options).toEqual(["B", "A"]);
+	});
+});
+
 describe("pauses: a dialog title with several lines", () => {
 	it("keeps only the title's first line: a guard puts the whole command on the next one", async () => {
 		const { customEntry } = await import("./helpers.ts");
@@ -306,6 +362,8 @@ describe("pauses: a dialog title with several lines", () => {
 			toolResultOf("call-b", "bash", ""),
 			assistant("Borrada."),
 		]);
-		expect(thread.replies[0].pauses).toEqual([{ text: "Allow recognized data-loss command? [bash: rm]", answer: "ran" }]);
+		expect(thread.replies[0].pauses).toEqual([
+			{ text: "Allow recognized data-loss command? [bash: rm]", answer: "ran", tool: "bash", program: "rm" },
+		]);
 	});
 });

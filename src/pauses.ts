@@ -8,6 +8,12 @@
 export interface Pause {
 	text: string;
 	answer: string;
+	/** The tool that showed the dialog: `ask_user_question`, `ask_user_choice`, or the tool a dialog ran in. */
+	tool: string;
+	/** The option labels the dialog offered, in order; absent for other dialogs and calls without options. */
+	options?: string[];
+	/** For a dialog shown while bash ran, the program name (never its arguments). */
+	program?: string;
 }
 
 /** Tools whose calls are dialogs with the user, read from the session. */
@@ -51,7 +57,9 @@ export function dialogPause(dialog: DialogPause, result: PauseResult): Pause {
 	const tool = program ? `${dialog.toolName}: ${program}` : dialog.toolName;
 	const line = firstLine(result.text);
 	const answer = !result.isError ? "ran" : line ? `stopped: ${line}` : "stopped";
-	return { text: `${title} [${tool}]`, answer };
+	const pause: Pause = { text: `${title} [${tool}]`, answer, tool: dialog.toolName };
+	if (program) pause.program = program;
+	return pause;
 }
 
 /** The parts of a tool result a pause reads. */
@@ -74,6 +82,22 @@ function firstLine(text: string): string {
 			.map((line) => line.trim())
 			.find(Boolean) ?? ""
 	);
+}
+
+/** The text labels of a call's `options` in order; undefined when it has none. */
+function labelsOf(options: unknown): string[] | undefined {
+	if (!Array.isArray(options)) return undefined;
+	const labels = options.flatMap((option) => {
+		const label = record(option)?.label;
+		return typeof label === "string" ? [label] : [];
+	});
+	return labels.length ? labels : undefined;
+}
+
+/** A pause of an ask tool, with its options only when the call had some. */
+function askPause(text: string, answer: string, tool: string, options: unknown): Pause {
+	const labels = labelsOf(options);
+	return labels ? { text, answer, tool, options: labels } : { text, answer, tool };
 }
 
 /** `User selected: 1. <label> (value: <value>)` → `<label>`, else the first line. */
@@ -113,7 +137,8 @@ export function pausesOf(name: string, args: unknown, result: PauseResult): Paus
 		const question = input?.question;
 		if (typeof question !== "string" || !question.trim()) return [];
 		const label = record(details?.selection)?.label;
-		return [{ text: question.trim(), answer: typeof label === "string" ? label : choiceAnswer(result.text) }];
+		const answer = typeof label === "string" ? label : choiceAnswer(result.text);
+		return [askPause(question.trim(), answer, name, input?.options)];
 	}
 	if (name !== "ask_user_question" || !Array.isArray(input?.questions)) return [];
 	const answers = Array.isArray(details?.answers) ? details.answers.map(record) : [];
@@ -122,6 +147,6 @@ export function pausesOf(name: string, args: unknown, result: PauseResult): Paus
 		if (typeof question !== "string" || !question.trim()) return [];
 		const given = answers.find((answer) => answer?.questionIndex === index) ?? answers[index];
 		const answer = detailAnswer(given) ?? questionAnswer(result.text, index, question.trim());
-		return [{ text: question.trim(), answer }];
+		return [askPause(question.trim(), answer, name, record(one)?.options)];
 	});
 }

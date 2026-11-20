@@ -8,6 +8,9 @@
 - Other dialogs shown while a tool runs (a command guard's confirm, a review consent) are recorded as
   `reply-thread.pause` entries (title, tool and, for `bash`, only the program name) and show up the
   same way, closed with the tool's outcome: `ran`, or `stopped: …` when the tool failed.
+- `Enter` or `o` on a dialog's ask in Answered opens a pause card: the question, the options with the
+  chosen ones marked `✓`, `Chose: …`, the tool, and the reply that ended the turn; `o` there opens
+  that reply and `Esc` goes back. Pauses now keep their tool and option labels.
 
 ## 0.3.0 (2026-11-17)
 

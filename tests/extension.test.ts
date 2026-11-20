@@ -1064,6 +1064,8 @@ describe("reply-thread extension: dialogs while a tool runs", () => {
 		await emit("ui_prompt_start", ctx, { reason: "ui_prompt", kind: "confirm", title: "Allow git push?" });
 		await emit("tool_execution_end", ctx, { toolCallId: "call-b", toolName: "bash", isError: false });
 		branch.push(toolResultOf("call-b", "bash", "Everything up-to-date"), assistant("Pusheado.", { id: "f1f1f1f1" }));
-		expect(buildThreads(branch).at(-1)?.replies[0].pauses).toEqual([{ text: "Allow git push? [bash: git]", answer: "ran" }]);
+		expect(buildThreads(branch).at(-1)?.replies[0].pauses).toEqual([
+			{ text: "Allow git push? [bash: git]", answer: "ran", tool: "bash", program: "git" },
+		]);
 	});
 });
