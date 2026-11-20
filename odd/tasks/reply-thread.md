@@ -86,7 +86,7 @@ reply an ordered and a unique ID, and keeps the open asks of earlier replies vis
 | T50 | S14 | [x] `N:` lines of a prompt → `✦` proposals on the previous reply's decision items; widget `✦ N look answered` | gentle-ai-worker, test-first (context backstop) | `10434e0` |
 | T51 | S15 | [x] `✎` on asks cited in the editor draft (no double paste) and the overlay reopens where you were | gentle-ai-worker, test-first (context backstop) | `60d81de` |
 | T52 | S15 | [x] A paste after a non-empty draft starts on its own paragraph (L104) | inline, test-first | `0fe858e` |
-| T53 | S13 | [ ] Pause context: the text of the assistant message that called an ask tool shows above the question in the pause card (L105-L106) | gentle-ai-worker, test-first (context backstop) | — |
+| T53 | S13 | [x] Pause context: the text of the assistant message that called an ask tool shows above the question in the pause card (L105-L106) | gentle-ai-worker, test-first (context backstop) | `1c2f9cc` |
 
 ## Log
 
@@ -263,3 +263,4 @@ R: sí funciona, pero es un poco intuitivo, me refiero a que primero tenemos que
   - `Pause` gains optional `context` (string): the text blocks of the assistant message that carries the ask tool call (`ask_user_question`, `ask_user_choice`), joined with `\n\n` and trimmed; absent when empty. Every pause of that message shares it (several questions, or several ask calls in one message). Dialog pauses (T48) have none. Reply IDs, `questionIds`, ask texts and answers unchanged.
   - Pause card (T49): when `context` exists, its lines come first, under the top border, as plain Markdown-free text wrapped to the width (`muted`), then an empty line, then the card as today. Height cut order (L14 cap): the context is cut first (down to 0 lines, the last kept line ending in `…`; when it is cut to nothing, show one `muted` line `… context above the question cut to fit`), then the L93 order (options, then the question down to 2 lines). Answered rows and the viewer header unchanged.
   - README "Dialogs (pauses)" one sentence; CHANGELOG "Unreleased".
+- L107 (2026-11-20, T53 evidence): worker mwpm2xha-1-zcfe (cannot commit); parent committed `1c2f9cc`. RED pauses 3 of 25, card 3 (2 boundary tests and the no-context card green before). GREEN 411/411, typecheck clean; no pins changed. Parent check on the live session: the ask pauses of messages with text carry it as `context` (e.g. P5.R1, P8.R1), the ones without text and the `gentle_review` dialog have none. Interpretations: the context shows raw (no Markdown rendering, `**x**` as written); a context cut to nothing keeps its empty line under the cut line; rows ≤ 12 still drop bottom lines as before. Not seen live yet.
