@@ -94,8 +94,15 @@ function labelsOf(options: unknown): string[] | undefined {
 	return labels.length ? labels : undefined;
 }
 
-/** A pause of an ask tool, with its options only when the call had some. */
-function askPause(text: string, answer: string, tool: string, options: unknown): Pause {
+/** Lines joined by one space: every row of the overlay is one line. */
+function oneLine(text: string): string {
+	return text.replace(/\s*[\r\n]+\s*/g, " ").trim();
+}
+
+/** A pause of an ask tool, on one line, with its options only when the call had some. */
+function askPause(question: string, chosen: string, tool: string, options: unknown): Pause {
+	const text = oneLine(question);
+	const answer = oneLine(chosen);
 	const labels = labelsOf(options);
 	return labels ? { text, answer, tool, options: labels } : { text, answer, tool };
 }

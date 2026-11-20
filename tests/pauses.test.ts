@@ -346,6 +346,21 @@ describe("pauses: tool and options for the pause card", () => {
 	});
 });
 
+describe("pauses: one line per question and answer", () => {
+	it("joins the lines of a typed answer and of a question, so each row stays one line", () => {
+		const ask = { questions: [{ header: "Notes", question: "¿Qué cambio?\n  Detalle abajo", options: [{ label: "Nada" }] }] };
+		const [thread] = buildThreads([
+			user("x"),
+			toolCalls([{ id: "call-q", name: "ask_user_question", arguments: ask }]),
+			toolResultOf("call-q", "ask_user_question", "1. ¿Qué cambio? — (custom) uno", {
+				details: { answers: [{ questionIndex: 0, kind: "custom", answer: "uno\n\n  dos\r\ntres" }] },
+			}),
+			assistant("Listo."),
+		]);
+		expect(thread.replies[0].pauses.map((pause) => [pause.text, pause.answer])).toEqual([["¿Qué cambio? Detalle abajo", "uno dos tres"]]);
+	});
+});
+
 describe("pauses: a dialog title with several lines", () => {
 	it("keeps only the title's first line: a guard puts the whole command on the next one", async () => {
 		const { customEntry } = await import("./helpers.ts");
