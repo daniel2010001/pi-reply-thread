@@ -255,7 +255,7 @@ Each time the overlay opens it reads what you have typed in the editor and not s
 that this draft would close if you sent it (its quote, or its ordered or unique ID) shows `✎` instead
 of `○`, also on a group row whose hidden similar ask is in the draft; the title adds `· N in draft`.
 `Enter` and `y` skip those asks, so nothing is pasted twice. The draft closes nothing: sending the
-message closes them as always.
+message closes them as always, except a quote whose answer you left empty (see below).
 
 The overlay also reopens where you left it: each tab selects the same ask (or reply) again, or the
 row that took its place once that ask closed. The opening tab is chosen as before. The place lives in
@@ -264,7 +264,9 @@ memory only and is forgotten when the session starts or switches and when the ex
 An ask closes only explicitly:
 
 - **Answered**: a later prompt of yours quotes it or cites its ordered or unique ID, which is what the
-  pasted quote does. Gentle Agents wake messages do not count.
+  pasted quote does, with your answer filled in. A pasted quote whose answer is still empty (`R:` with
+  nothing after it, or nothing after the `→`) does not close the ask. Gentle Agents wake messages do
+  not count.
 - **Dismissed** with `x`.
 
 ### Loose `N:` answers (no model)
@@ -319,6 +321,14 @@ when its ID has changed since you copied it, for example after a reply was renum
 section. In the `same line` format the text ends at the `→` before your answer. A quote with nothing
 after the colon, or with a text no ask has, closes the ask its ID names; an ID outside a quote does
 too.
+
+A quote closes its ask only when you answered it. If the `R:` line right under the quote has nothing
+after `R:`, or (in the `same line` format) nothing follows the `→`, the quote closes nothing, neither
+by its text nor by the ID on it: send several pasted asks, fill in only some, and only those close.
+A quote with no `R:` line and no `→` still closes its ask (its answer is the next plain line, or
+your prompt's first line), and an ID you mention outside a quote still closes that ask. In your
+unsent draft a quote counts even with its answer empty, so a fresh paste is marked `✎` and is not
+pasted twice (see [Draft and place](#draft-and-place)).
 
 ### Repeated asks
 
@@ -576,6 +586,7 @@ These work as designed and are not bugs:
 - In the default mode, a question outside the decision section is not tracked; the reply viewer says
   so. Use `--reply-thread-asks all` to track every question.
 - An answer that does not quote the ask (by ID or text) does not close it. Close it with `x`.
+- A pasted quote sent with its answer empty (`R:` or `→` with nothing after) does not close its ask.
 - A group row answers only its newest ask; press `l` first to close the group together.
 - A reworded repeat that shares few words is neither grouped nor marked `✓?`.
 - `/replies` only runs with an empty editor, so while the agent works use `Alt+R`.

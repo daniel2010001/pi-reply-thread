@@ -47,13 +47,13 @@ describe("buildPending: answered", () => {
 		expect(open([...base(), user("p1.r1.q2 dale")]).map(([id]) => id)).toEqual(["P1.R1.Q1"]);
 	});
 
-	it("closes the asks a prompt pasted in either answer format cites", () => {
+	it("closes the asks a prompt pasted in either answer format cites, once their answer is filled in", () => {
 		const asks = buildPending(base());
 		for (const format of ["lines", "inline"] as const) {
-			for (const yes of [false, true]) {
-				expect(open([...base(), user(`${answerText(asks, yes, format)}dale`)])).toEqual([]);
-				expect(open([...base(), user(answerText(asks.slice(1), yes, format))]).map(([id]) => id)).toEqual(["P1.R1.Q1"]);
-			}
+			expect(open([...base(), user(`${answerText(asks, true, format)}dale`)])).toEqual([]);
+			expect(open([...base(), user(answerText(asks.slice(1), true, format))]).map(([id]) => id)).toEqual(["P1.R1.Q1"]);
+			// Without `y` only the last answer slot, followed by "dale", is filled in (T54).
+			expect(open([...base(), user(`${answerText(asks, false, format)}dale`)]).map(([id]) => id)).toEqual(["P1.R1.Q1"]);
 		}
 	});
 
@@ -270,11 +270,8 @@ describe("buildAsks: answer text", () => {
 			closedBy.kind === "answer" ? closedBy.text : closedBy.kind,
 		]);
 
-	it("lines: the R: line under the cited quote, trimmed, empty when nothing follows R:", () => {
-		expect(answers("> P1.R1.Q1: ¿Uno?\nR:  sí, dale  \n\n> P1.R1.Q2: ¿Dos?\nR: ")).toEqual([
-			["P1.R1.Q1", "sí, dale"],
-			["P1.R1.Q2", ""],
-		]);
+	it("lines: the R: line under the cited quote, trimmed; nothing after R: closes nothing (T54)", () => {
+		expect(answers("> P1.R1.Q1: ¿Uno?\nR:  sí, dale  \n\n> P1.R1.Q2: ¿Dos?\nR: ")).toEqual([["P1.R1.Q1", "sí, dale"]]);
 	});
 
 	it("inline: the text after → on the quote line, even when the next line is another quote with R:", () => {
@@ -495,11 +492,11 @@ describe("buildAsks: a quote closes the ask whose text it carries", () => {
 			],
 		});
 		const inline = `> P1.R1.Q3: ${MERGE} → later\n> P1.R1.Q2: Only top-level items? → \n> P1.R1.Q1: Do I align the plain index? → no → never`;
+		// Nothing after the `→` of the second quote: it leaves its ask open (T54).
 		expect(state(inline)).toEqual({
-			open: ["P1.R1.Q1"],
+			open: ["P1.R1.Q1", "P1.R1.Q3"],
 			closed: [
 				["P1.R1.Q2", "no → never"],
-				["P1.R1.Q3", ""],
 				["P1.R1.Q4", "later"],
 			],
 		});
@@ -517,6 +514,76 @@ describe("buildAsks: a quote closes the ask whose text it carries", () => {
 			["P1.R1.Q3", `> P1.R1.Q3: ${MERGE}`],
 			["P1.R1.Q4", "yes"],
 		]);
+	});
+});
+
+describe("buildAsks: a quote with an empty answer slot closes nothing", () => {
+	const base = () => [user("hola"), assistant("¿Uno?\n\n¿Dos?", { id: "a1b2c3d4" })];
+	const state = (prompt: string) => {
+		const { pending, closed } = buildAsks([...base(), user(prompt)]);
+		return {
+			open: pending.map((ask) => ask.ordinal),
+			closed: closed.map(({ ask, closedBy }) => [ask.ordinal, closedBy.kind === "answer" ? closedBy.text : closedBy.kind]),
+		};
+	};
+	const nothing = { open: ["P1.R1.Q1", "P1.R1.Q2"], closed: [] };
+
+	it("lines: an R: line with nothing after it leaves the ask open, by text or by the ID on the quote", () => {
+		expect(state("> P1.R1.Q1: ¿Uno?\nR: ")).toEqual(nothing);
+		expect(state("> P1.R1.Q1: ¿Uno?\nR:")).toEqual(nothing);
+		expect(state("> P1.R1.Q1: ¿Uno?\n  R:   \n\nseguimos")).toEqual(nothing);
+		// Closing by the ID on the quote line: no text after the colon, or a text no ask has.
+		expect(state("> P1.R1.Q1:\nR: ")).toEqual(nothing);
+		expect(state("> a1b2c3d4.2: Something I wrote myself?\nR:")).toEqual(nothing);
+	});
+
+	it("inline: nothing after → leaves the ask open, by text or by the ID on the quote", () => {
+		expect(state("> P1.R1.Q1: ¿Uno? → ")).toEqual(nothing);
+		expect(state("> P9.R9.Q9: ¿Uno? →")).toEqual(nothing);
+		expect(state("> P1.R1.Q2: Something I wrote myself? → ")).toEqual(nothing);
+	});
+
+	it("a filled answer slot still closes with its answer", () => {
+		expect(state("> P1.R1.Q1: ¿Uno?\nR: sí")).toEqual({ open: ["P1.R1.Q2"], closed: [["P1.R1.Q1", "sí"]] });
+		expect(state("> P1.R1.Q1: ¿Uno? → sí")).toEqual({ open: ["P1.R1.Q2"], closed: [["P1.R1.Q1", "sí"]] });
+		// An empty → with a filled R: under it is answered by the R: line, as the answer text reads it.
+		expect(state("> P1.R1.Q1: ¿Uno? → \nR: sí")).toEqual({ open: ["P1.R1.Q2"], closed: [["P1.R1.Q1", "sí"]] });
+	});
+
+	it("several pasted quotes close only the ones with an answer", () => {
+		expect(state("> P1.R1.Q1: ¿Uno?\nR: sí\n\n> P1.R1.Q2: ¿Dos?\nR: ")).toEqual({
+			open: ["P1.R1.Q2"],
+			closed: [["P1.R1.Q1", "sí"]],
+		});
+		expect(state("> P1.R1.Q1: ¿Uno? → \n> P1.R1.Q2: ¿Dos? → no")).toEqual({
+			open: ["P1.R1.Q1"],
+			closed: [["P1.R1.Q2", "no"]],
+		});
+		const asks = buildPending(base());
+		for (const format of ["lines", "inline"] as const) {
+			expect(state(answerText(asks, false, format))).toEqual(nothing);
+		}
+	});
+
+	it("a quote with no R: line and no → closes as before", () => {
+		expect(state("> P1.R1.Q1: ¿Uno?\n\nLa primera.")).toEqual({ open: ["P1.R1.Q2"], closed: [["P1.R1.Q1", "La primera."]] });
+		expect(state("Contesto abajo.\n> P1.R1.Q1: ¿Uno?")).toEqual({ open: ["P1.R1.Q2"], closed: [["P1.R1.Q1", "Contesto abajo."]] });
+	});
+
+	it("an ID cited outside a quote still closes, next to a quote with an empty answer", () => {
+		expect(state("P1.R1.Q2 no")).toEqual({ open: ["P1.R1.Q1"], closed: [["P1.R1.Q2", "P1.R1.Q2 no"]] });
+		expect(state("> P1.R1.Q1: ¿Uno?\nR: \n\nAnd P1.R1.Q1: no.")).toEqual({
+			open: ["P1.R1.Q2"],
+			closed: [["P1.R1.Q1", "> P1.R1.Q1: ¿Uno?"]],
+		});
+	});
+
+	it("draftAsks still lists the asks of a fresh paste, whose answer slots are empty", () => {
+		const asks = buildPending(base());
+		for (const format of ["lines", "inline"] as const) {
+			expect(draftAsks(base(), answerText(asks, false, format))).toEqual(["a1b2c3d4.1", "a1b2c3d4.2"]);
+		}
+		expect(draftAsks(base(), "> P1.R1.Q1:\nR: ")).toEqual(["a1b2c3d4.1"]);
 	});
 });
 
@@ -868,10 +935,11 @@ describe("draftAsks: the open asks a draft would close", () => {
 		expect(draftAsks(entries, "> P1.R1.Q1: ¿Uno?\nR: sí")).toEqual(["a1b2c3d4.1", "b1b2c3d4.1"]);
 	});
 
-	it("agrees with buildAsks when the same text is then sent as a prompt", () => {
+	it("agrees with buildAsks when the same text, with its answers filled in, is then sent as a prompt", () => {
 		const linked = [...base(), askEntry({ action: "link", ask: "b1b2c3d4.1", continues: "a1b2c3d4.1" })];
+		// An empty answer slot is in the draft but closes nothing when sent (T54), so every draft here has its answer.
 		const drafts = [
-			"> P1.R1.Q2: ¿Dos?\nR: ",
+			"> P1.R1.Q2: ¿Dos?\nR: no",
 			"> P1.R1.Q1: ¿Tres? → sí",
 			"P1.R1.Q1 y a1b2c3d4.2",
 			"> P2.R1.Q1: ¿Uno?\nR: sí",

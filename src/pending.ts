@@ -179,6 +179,17 @@ function answerAt(prompt: string, lines: readonly string[], at: number, arrow: n
 }
 
 /**
+ * Whether the quote on trimmed line `at` has an empty answer slot: the `R:` line right under it has
+ * nothing after `R:`, or, with no `R:` line, nothing follows its answer's `arrow`. A quote with neither
+ * has no slot, so it is not empty.
+ */
+function emptySlot(lines: readonly string[], at: number, arrow: number): boolean {
+	const under = lines[at + 1];
+	if (under?.startsWith("R:")) return !under.slice(2).trim();
+	return arrow >= 0 && !lines[at].slice(arrow + 1).trim();
+}
+
+/**
  * What a prompt answers to an ask it cites, trimmed: the `R:` line right under the cited quote, the text
  * after `→` on the quote line, or the first line after the quote that is neither a quote nor empty.
  * A prompt that cites the ask outside a quote, or has nothing after the quote, answers its first line.
@@ -285,7 +296,8 @@ export function buildAsks(
 /**
  * The unique IDs of the open asks a draft would close if it were sent as the next prompt, by the rules
  * `buildAsks` applies to a prompt (a quote carrying an ask's text, or its ordered or unique ID cited),
- * every member of a chain it closes, in branch order. Reads only; the draft closes nothing.
+ * every member of a chain it closes, in branch order. A quote whose answer slot is still empty counts
+ * here, though sent as is it closes nothing. Reads only; the draft closes nothing.
  */
 export function draftAsks(
 	entries: readonly SessionEntry[],
@@ -295,7 +307,8 @@ export function draftAsks(
 ): string[] {
 	if (!draft.trim()) return [];
 	const { state, known, isClosed } = scanAsks(entries, threads, mode);
-	const hit = new Set(promptCloses(draft, known, isClosed).map((one) => one.ask.id));
+	// A fresh paste has empty answer slots: its asks are in the draft even though sending it as is closes nothing.
+	const hit = new Set(promptCloses(draft, known, isClosed, { emptyCloses: true }).map((one) => one.ask.id));
 	return state.pending
 		.map((row) => [...row.chain, row])
 		.filter((members) => members.some((member) => hit.has(member.id)))
@@ -307,32 +320,37 @@ export function draftAsks(
 /**
  * The asks a prompt closes and the answer it gives each, in the order `buildAsks` closes them: first the
  * quotes that carry an ask's text (`quotedAsk`), then the asks cited by ID outside those lines.
+ * A quote line (`> <id>: <text>`) whose answer slot is empty (`emptySlot`) closes nothing, by its text
+ * or by the ID on it, unless `emptyCloses` is set, as for a draft.
  */
 function promptCloses(
 	prompt: string,
 	asks: readonly Ask[],
 	isClosed: (id: string) => boolean,
+	{ emptyCloses = false }: { emptyCloses?: boolean } = {},
 ): { ask: Ask; text: string }[] {
 	const lines = prompt.split("\n").map((line) => line.trim());
 	const closes: { ask: Ask; text: string }[] = [];
 	const now = new Set<string>();
 	const shut = (id: string) => now.has(id) || isClosed(id);
 	// A quote closes the ask whose text it carries, even when its ID now names another ask; the ID rule
-	// then skips that line.
-	const byText = new Set<number>();
+	// then skips that line. A quote with an empty answer slot is skipped too and closes nothing.
+	const skip = new Set<number>();
 	for (const [index, line] of lines.entries()) {
 		const found = quotedAsk(line, asks, (ask) => !shut(ask.id));
-		if (!found) continue;
-		byText.add(index);
+		const empty = !emptyCloses && QUOTE.test(line) && emptySlot(lines, index, found?.arrow ?? line.lastIndexOf("→"));
+		if (empty) skip.add(index);
+		if (!found || empty) continue;
+		skip.add(index);
 		if (found.ask) {
 			closes.push({ ask: found.ask, text: answerAt(prompt, lines, index, found.arrow) });
 			now.add(found.ask.id);
 		}
 	}
-	const rest = lines.filter((_, index) => !byText.has(index)).join("\n");
+	const rest = lines.filter((_, index) => !skip.has(index)).join("\n");
 	for (const ask of asks) {
 		if (!shut(ask.id) && cites(rest, ask)) {
-			closes.push({ ask, text: answerOf(prompt, ask, byText) });
+			closes.push({ ask, text: answerOf(prompt, ask, skip) });
 			now.add(ask.id);
 		}
 	}

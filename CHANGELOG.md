@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A pasted quote whose answer is empty (`R:` with nothing after it, or nothing after the `→` in the
+  same-line format) no longer closes its ask when you send the prompt, neither by its text nor by the
+  ID on it; fill in only some of several pasted asks and only those close. Quotes without an `R:`
+  line or `→`, and IDs mentioned outside a quote, close as before. In the draft such a quote still
+  counts, so a fresh paste keeps its `✎` and is not pasted twice.
 - The pause card shows the context the agent wrote with an `ask_user_question` or `ask_user_choice`
   call (the text of that same message) above the question, muted; on a short screen it is cut first,
   down to `… context above the question cut to fit`. Answered rows, the viewer and question IDs do not

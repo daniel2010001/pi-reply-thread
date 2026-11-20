@@ -823,7 +823,7 @@ describe("Answered tab", () => {
 	const answered = () => {
 		branch.push(
 			askEntry({ action: "dismiss", ask: "a1b2c3d4.2" }),
-			user("> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nR: sí, las tres\n\n> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: "),
+			user("> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nR: sí, las tres\n\n> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: también"),
 		);
 		const view = central(branch, { tab: "replies" });
 		view.key("\t");
@@ -847,7 +847,7 @@ describe("Answered tab", () => {
 		expect(rows.slice(1, 9)).toEqual([
 			expect.stringMatching(/^│ ▌P3  revisá los tests +12:00 │$/),
 			expect.stringMatching(/^│ ›✓ P3\.R1\.Q1  ¿Borro las tres ramas viejas\? +│$/),
-			expect.stringMatching(/^│ {4}↳ P4 +│$/),
+			expect.stringMatching(/^│ {4}↳ P4  también +│$/),
 			expect.stringMatching(/^│ ▌P1  limpiá la rama +12:00 │$/),
 			expect.stringMatching(/^│  ✓ P1\.R1\.Q1  Hay tres ramas viejas\. ¿Las borro\? +│$/),
 			expect.stringMatching(/^│ {4}↳ P4  sí, las tres +│$/),
@@ -1120,7 +1120,7 @@ describe("undo and reopen", () => {
 	const answered = () => {
 		branch.push(
 			askEntry({ action: "dismiss", ask: "a1b2c3d4.2" }),
-			user("> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nR: sí, las tres\n\n> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: "),
+			user("> P1.R1.Q1: Hay tres ramas viejas. ¿Las borro?\nR: sí, las tres\n\n> P3.R1.Q1: ¿Borro las tres ramas viejas?\nR: también"),
 		);
 		const view = central(branch, { tab: "replies" });
 		view.key("\t");
