@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-11-20)
 
 - A pasted quote whose answer is empty (`R:` with nothing after it, or nothing after the `→` in the
   same-line format) no longer closes its ask when you send the prompt, neither by its text nor by the
