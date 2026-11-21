@@ -8,7 +8,8 @@
   line or `→`, and IDs mentioned outside a quote, close as before. In the draft such a quote still
   counts, so a fresh paste keeps its `✎` and is not pasted twice.
 - The pause card shows the context the agent wrote with an `ask_user_question` or `ask_user_choice`
-  call (the text of that same message) above the question, muted; on a short screen it is cut first,
+  call (the text of that same message) above the question, rendered as Markdown like the reply viewer
+  (tables, code, emphasis, lists); on a short screen its rendered lines are cut first,
   down to `… context above the question cut to fit`. Answered rows, the viewer and question IDs do not
   change; other dialogs have no context.
 - Answering from the central while the editor already holds text starts the paste on its own

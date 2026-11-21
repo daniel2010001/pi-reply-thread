@@ -115,6 +115,8 @@ function selectable(row: PendingRow): boolean {
 interface PauseCard {
 	row: ClosedAsk;
 	pause: Pause;
+	/** The pause context as the reply viewer renders a reply; it caches its lines per width. */
+	context: Markdown | undefined;
 }
 
 /** The pause behind a closed row of a dialog: its asks come after the reply's text asks (`questionIds`). */
@@ -756,7 +758,10 @@ export class RepliesView implements Component {
 		else if ((kb.matches(data, "tui.select.confirm") || matchesKey(data, "o")) && row?.kind === "ask") {
 			// A dialog's row opens its card; the reply is one `o` away from there.
 			const pause = pauseOf(row.row);
-			if (pause) this.card = { row: row.row, pause };
+			if (pause) {
+				const context = pause.context ? new Markdown(pause.context, 0, 0, getMarkdownTheme()) : undefined;
+				this.card = { row: row.row, pause, context };
+			}
 			else this.open(row.row.ask.reply, row.row.ask.thread);
 		} else if (this.speak && matchesKey(data, "s") && row?.kind === "ask") {
 			this.speak(row.row.ask.ordinal, row.row.ask.text);
@@ -786,7 +791,7 @@ export class RepliesView implements Component {
 	 */
 	private renderCard(width: number): string[] {
 		const theme = this.theme;
-		const { row, pause } = this.card as PauseCard;
+		const { row, pause, context } = this.card as PauseCard;
 		const content = width - 4;
 		const body = this.available() - 2;
 		const question = wrapTextWithAnsi(pause.text, Math.max(1, content));
@@ -795,7 +800,7 @@ export class RepliesView implements Component {
 		const chosen = (label: string) => label === pause.answer || parts.includes(label);
 		// The empty line, `Chose:`, `Tool:` and `In …`, and the `Options` title when there are options.
 		const fixed = 4 + (options.length ? 1 : 0);
-		const intro = this.cardContext(pause, content, body - question.length - fixed - options.length - 1);
+		const intro = this.cardContext(context, content, body - question.length - fixed - options.length - 1);
 		const space = body - intro.length;
 		let shown = options.length;
 		if (question.length + fixed + options.length > space) {
@@ -834,19 +839,22 @@ export class RepliesView implements Component {
 	}
 
 	/**
-	 * The context lines of a pause card and the empty line under them, `muted`, in at most `room` lines of text:
-	 * cut to `room` lines ending in `…`, or to one cut line when no line fits. Nothing without a context.
+	 * The context lines of a pause card, rendered as Markdown like the reply viewer, and the empty line under them,
+	 * in at most `room` lines of text: cut to `room` lines ending in `…`, or to one muted cut line when no line fits.
+	 * Nothing without a context.
 	 */
-	private cardContext(pause: Pause, content: number, room: number): string[] {
-		if (!pause.context) return [];
-		const wrapped = wrapTextWithAnsi(pause.context, Math.max(1, content));
-		let kept = wrapped;
-		if (room < 1) kept = ["… context above the question cut to fit"];
-		else if (room < wrapped.length) {
-			kept = wrapped.slice(0, room);
+	private cardContext(context: Markdown | undefined, content: number, room: number): string[] {
+		if (!context) return [];
+		// The component pads every line to the width with spaces; the card frame pads again.
+		const rendered = context.render(Math.max(1, content)).map((line) => line.replace(/ +$/, ""));
+		while (rendered.length && !visibleWidth(rendered[rendered.length - 1])) rendered.pop();
+		let kept = rendered;
+		if (room < 1) kept = [this.theme.fg("muted", "… context above the question cut to fit")];
+		else if (room < rendered.length) {
+			kept = rendered.slice(0, room);
 			kept[room - 1] = truncateToWidth(`${kept[room - 1]}…`, content, "…");
 		}
-		return [...kept.map((line) => this.theme.fg("muted", line)), ""];
+		return [...kept, ""];
 	}
 
 	// ── Frame ────────────────────────────────────────────────────────────────
@@ -1433,5 +1441,6 @@ export class RepliesView implements Component {
 
 	invalidate(): void {
 		this.body?.invalidate();
+		this.card?.context?.invalidate();
 	}
 }

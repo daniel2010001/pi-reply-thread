@@ -8,7 +8,8 @@ import {
 	type ThemeBg,
 	type ThemeColor,
 } from "@earendil-works/pi-coding-agent";
-import { stripTerminalSequences, type TUI, visibleWidth } from "@earendil-works/pi-tui";
+import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import { Markdown, stripTerminalSequences, type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { type Place, RepliesView, type ViewResult } from "../extensions/replies-view.ts";
 import type { AskMode } from "../src/asks.ts";
@@ -2127,14 +2128,14 @@ describe("pause card", () => {
 	};
 	const TWO_LINES = "Hay dos sitios posibles para la config.\nEl compose ya tiene los **secretos**.";
 
-	it("shows the context of the ask call above the question, muted and as written, then an empty line", () => {
+	it("shows the context of the ask call above the question, rendered as Markdown, then an empty line", () => {
 		withContext(TWO_LINES);
 		const view = answered();
 		view.key("tui.select.confirm");
 		expect(view.text(W)).toEqual([
 			top("P4.R1.Q1 · pause"),
 			row("Hay dos sitios posibles para la config."),
-			row("El compose ya tiene los **secretos**."),
+			row("El compose ya tiene los secretos."),
 			row(""),
 			row("¿Dónde versiono la config?"),
 			row(""),
@@ -2147,8 +2148,8 @@ describe("pause card", () => {
 			HINTS,
 		]);
 		const lines = view.lines(W);
-		expect(lines[1]).toContain(`${fg("muted")}Hay dos sitios`);
-		expect(lines[2]).toContain(`${fg("muted")}El compose`);
+		expect(lines[1]).toContain("Hay dos sitios");
+		expect(lines[2]).toContain(theme.bold("secretos"));
 		expect(lines[4]).toContain(`${fg("text")}¿Dónde versiono`);
 	});
 
@@ -2209,6 +2210,82 @@ describe("pause card", () => {
 				expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
 				expect(lines[0]).toMatch(/^╭─ P4\.R1\.Q1 · pause/);
 				expect(lines.at(-1)).toMatch(/^╰─/);
+			}
+		}
+	});
+
+	const TABLE = [
+		"Opciones para la config:",
+		"",
+		"|col1|col2|",
+		"|---|---|",
+		"|compose|`docker compose`|",
+		"|aparte|**repo propio**|",
+		"",
+		"Uso `git` y **secretos** cifrados.",
+	].join("\n");
+	/** The context lines of the open card: from under the top border to the empty line above the question. */
+	const contextLines = (lines: string[]) => lines.slice(1, lines.findIndex((line) => line.includes("¿Dónde versiono")) - 1);
+
+	it("renders the context as Markdown with the reply viewer's component and theme: table, inline code, bold", () => {
+		withContext(TABLE);
+		for (const width of [40, W]) {
+			const view = answered(0, 60);
+			view.key("tui.select.confirm");
+			const shown = contextLines(view.text(width)).map((line) => line.slice(2, -2).trimEnd());
+			const viewer = new Markdown(TABLE, 0, 0, getMarkdownTheme())
+				.render(width - 4)
+				.map((line) => stripTerminalSequences(line).trimEnd());
+			while (viewer.at(-1) === "") viewer.pop();
+			expect(shown).toEqual(viewer);
+			const text = shown.join("\n");
+			expect(text).not.toContain("|col1|col2|");
+			expect(text).not.toContain("**");
+			expect(text).not.toContain("`");
+			expect(shown.some((line) => /[┌├└─]/.test(line))).toBe(true);
+			expect(shown.some((line) => /col1\s*│\s*col2/.test(line))).toBe(true);
+			expect(text).toContain("docker compose");
+			expect(text).toContain("repo propio");
+			expect(text).toContain("Uso git y secretos cifrados.");
+			expect(view.text(width).every((line) => visibleWidth(line) === width)).toBe(true);
+		}
+	});
+
+	it("cuts the rendered context lines on a short screen, the last kept one ending in …, then to the cut line", () => {
+		withContext(TABLE);
+		const full = answered(0, 60);
+		full.key("tui.select.confirm");
+		const rendered = contextLines(full.text(W));
+		expect(rendered.length).toBeGreaterThan(4);
+		expect(rendered[2]).toMatch(/^│ ┌─+┬─+┐ +│$/);
+		// 16 rows leave 1 context line (see the cut test above); 18 rows leave 3.
+		for (const [rows, room] of [
+			[16, 1],
+			[18, 3],
+		] as const) {
+			const view = answered(0, rows);
+			view.key("tui.select.confirm");
+			const kept = contextLines(view.text(W));
+			expect(kept.slice(0, room - 1)).toEqual(rendered.slice(0, room - 1));
+			expect(kept).toHaveLength(room);
+			expect(kept[room - 1].slice(2, -2).trimEnd()).toBe(`${rendered[room - 1].slice(2, -2).trimEnd()}…`);
+			expect(view.text(W)[room + 2]).toBe(row("¿Dónde versiono la config?"));
+		}
+		const none = answered(0, 15);
+		none.key("tui.select.confirm");
+		expect(none.text(W).slice(1, 4)).toEqual([
+			row("… context above the question cut to fit"),
+			row(""),
+			row("¿Dónde versiono la config?"),
+		]);
+		for (const rows of [8, 12, 14, 20, 30]) {
+			const cap = Math.min(rows - 4, Math.floor(rows * 0.9));
+			const small = answered(0, rows);
+			small.key("tui.select.confirm");
+			for (const width of [40, W]) {
+				const lines = small.text(width);
+				expect(lines.length).toBeLessThanOrEqual(cap);
+				expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
 			}
 		}
 	});

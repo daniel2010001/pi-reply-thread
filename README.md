@@ -500,7 +500,7 @@ answer; no `Options` block for a dialog without options), `Chose: <your answer>`
 (`Tool: bash · rm` for a command guard), and the reply that ended the turn. On a short screen the
 options are cut to `… N more` first, then the question down to two lines. When the agent wrote some
 text in the same message as the `ask_user_question` or `ask_user_choice` call, the card shows that
-text first, muted and as written, above the question (cut before anything else on a short screen,
+text first, rendered as Markdown like the reply viewer (tables, code, emphasis), above the question (cut before anything else on a short screen,
 down to `… context above the question cut to fit`); other dialogs have none. In the card, `o` opens
 that reply (`Esc` there comes back to the card) and `Esc` goes back to Answered on the same row.
 
